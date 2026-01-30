@@ -1,0 +1,139 @@
+spring:
+  application:
+    name: plaid-enrich-service
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+        use_sql_comments: true
+        jdbc:
+          batch_size: 20
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+# Plaid API Configuration
+plaid:
+  api:
+    base-url: ${PLAID_API_BASE_URL:http://localhost:8089}
+    enrich-endpoint: /enrich/transactions
+    timeout:
+      connection: 5000
+      request: 10000
+    api-key: ${PLAID_API_KEY:mock-key}
+    client-id: ${PLAID_CLIENT_ID:mock-client-id}
+
+# Resilience4j Configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      plaidApi:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+        record-exceptions:
+          - org.springframework.web.reactive.function.client.WebClientRequestException
+          - org.springframework.web.reactive.function.client.WebClientResponseException.InternalServerError
+          - org.springframework.web.reactive.function.client.WebClientResponseException.ServiceUnavailable
+          - java.util.concurrent.TimeoutException
+
+  retry:
+    instances:
+      plaidApi:
+        max-attempts: 3
+        wait-duration: 1s
+        exponential-backoff-multiplier: 2
+        retry-exceptions:
+          - org.springframework.web.reactive.function.client.WebClientRequestException
+          - java.util.concurrent.TimeoutException
+          - org.springframework.web.reactive.function.client.WebClientResponseException.ServiceUnavailable
+        ignore-exceptions:
+          - org.springframework.web.reactive.function.client.WebClientResponseException.BadRequest
+          - org.springframework.web.reactive.function.client.WebClientResponseException.Unauthorized
+
+  bulkhead:
+    instances:
+      plaidApi:
+        max-concurrent-calls: 10
+        max-wait-duration: 2s
+
+  thread-pool-bulkhead:
+    instances:
+      plaidApi:
+        max-thread-pool-size: 10
+        core-thread-pool-size: 5
+        queue-capacity: 50
+        keep-alive-duration: 20s
+
+# Management & Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,circuitbreakers,circuitbreakerevents
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
+    db:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
+
+# OpenAPI Documentation
+springdoc:
+  api-docs:
+    path: /api-docs
+    enabled: true
+  swagger-ui:
+    path: /swagger-ui.html
+    enabled: true
+    operations-sorter: method
+    tags-sorter: alpha
+  show-actuator: true
+
+# Server Configuration
+server:
+  port: 8080
+  compression:
+    enabled: true
+  error:
+    include-message: always
+    include-binding-errors: always
+  shutdown: graceful
+
+# Logging
+logging:
+  level:
+    root: INFO
+    com.plaid.enrich: INFO
+    org.springframework.web: INFO
+    org.hibernate.SQL: DEBUG
+    io.github.resilience4j: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"

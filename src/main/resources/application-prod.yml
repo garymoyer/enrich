@@ -1,0 +1,91 @@
+spring:
+  datasource:
+    url: ${AZURE_SQL_CONNECTION_STRING}
+    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+      leak-detection-threshold: 60000
+
+  jpa:
+    show-sql: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: false
+        jdbc:
+          batch_size: 50
+
+  flyway:
+    enabled: true
+    validate-on-migrate: true
+
+# Plaid API - Production
+plaid:
+  api:
+    base-url: ${PLAID_API_BASE_URL:https://production.plaid.com}
+    api-key: ${PLAID_API_KEY}
+    client-id: ${PLAID_CLIENT_ID}
+    timeout:
+      connection: 5000
+      request: 15000
+
+# Azure Application Insights
+azure:
+  application-insights:
+    instrumentation-key: ${APPLICATIONINSIGHTS_CONNECTION_STRING}
+    enabled: true
+
+# Logging - JSON format for Azure
+logging:
+  level:
+    root: INFO
+    com.plaid.enrich: INFO
+    org.springframework.web: WARN
+    org.hibernate.SQL: WARN
+    io.github.resilience4j: INFO
+  pattern:
+    console: '{"time":"%d{yyyy-MM-dd HH:mm:ss.SSS}","level":"%level","thread":"%thread","logger":"%logger{36}","message":"%msg","exception":"%ex{full}"}%n'
+
+# Management & Actuator - Production settings
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+      azure-monitor:
+        enabled: true
+
+# OpenAPI - Disabled in production or secured
+springdoc:
+  api-docs:
+    enabled: ${ENABLE_SWAGGER:false}
+  swagger-ui:
+    enabled: ${ENABLE_SWAGGER:false}
+
+# Server Configuration - Production
+server:
+  port: ${PORT:8080}
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/xml,text/plain
+  error:
+    include-message: never
+    include-binding-errors: never
+  shutdown: graceful
+  tomcat:
+    max-connections: 10000
+    threads:
+      max: 200
+      min-spare: 10

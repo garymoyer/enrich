@@ -1,0 +1,48 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:enrichdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: false  # Using Hibernate DDL for H2 in dev
+
+# Plaid API - WireMock
+plaid:
+  api:
+    base-url: http://localhost:8089
+    api-key: dev-mock-key
+    client-id: dev-mock-client-id
+
+# Logging
+logging:
+  level:
+    root: INFO
+    com.plaid.enrich: DEBUG
+    org.springframework.web: DEBUG
+    org.hibernate: DEBUG
+    io.github.resilience4j: TRACE
+
+# Development-friendly settings
+management:
+  endpoint:
+    health:
+      show-details: always
+
+springdoc:
+  swagger-ui:
+    enabled: true

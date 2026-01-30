@@ -1,0 +1,19 @@
+{
+  "enriched_transactions": [
+    {
+      "id": "txn_001",
+      "category": "Food & Drink",
+      "category_id": "13005000",
+      "merchant_name": "Starbucks Coffee",
+      "logo_url": "https://logo.clearbit.com/starbucks.com",
+      "website": "https://www.starbucks.com",
+      "confidence_level": "HIGH",
+      "enrichment_metadata": {
+        "location": "Seattle, WA",
+        "merchant_type": "Coffee Shop",
+        "chain": true
+      }
+    }
+  ],
+  "request_id": "plaid_550e8400-e29b-41d4-a716-446655440000"
+}

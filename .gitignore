@@ -1,0 +1,106 @@
+# Compiled class files
+*.class
+
+# Log files
+*.log
+
+# Maven
+target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Gradle
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# IntelliJ IDEA
+.idea/
+*.iws
+*.iml
+*.ipr
+out/
+
+# Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# VS Code
+.vscode/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# Application
+application-local.yml
+application-secrets.yml
+
+# Testing
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage reports
+coverage/
+*.lcov
+.nyc_output
+
+# PIT mutation testing reports
+pit-reports/
+
+# JaCoCo
+jacoco.exec
+*.exec
+
+# H2 Database
+*.db
+*.trace.db
+
+# Logs
+logs/
+*.log.*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Azure
+.azure/
+
+# Docker
+docker-compose.override.yml
+
+# Secrets
+*secret*
+*credential*
+*password*
+!src/test/resources/*
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~

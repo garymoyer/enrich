@@ -1,0 +1,68 @@
+spring:
+  datasource:
+    # Testcontainers will override these at runtime
+    url: jdbc:tc:sqlserver:2022-latest:///enrichdb
+    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
+
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    clean-disabled: false
+
+# Plaid API - WireMock for testing
+plaid:
+  api:
+    base-url: http://localhost:8089
+    api-key: test-mock-key
+    client-id: test-mock-client-id
+    timeout:
+      connection: 2000  # Faster timeouts for tests
+      request: 3000
+
+# Resilience4j - Faster for testing
+resilience4j:
+  circuitbreaker:
+    instances:
+      plaidApi:
+        sliding-window-size: 5
+        minimum-number-of-calls: 3
+        wait-duration-in-open-state: 1s
+
+  retry:
+    instances:
+      plaidApi:
+        max-attempts: 2
+        wait-duration: 100ms
+
+  bulkhead:
+    instances:
+      plaidApi:
+        max-concurrent-calls: 5
+        max-wait-duration: 500ms
+
+# Logging
+logging:
+  level:
+    root: WARN
+    com.plaid.enrich: DEBUG
+    org.testcontainers: INFO
+
+# Disable actuator in tests
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
