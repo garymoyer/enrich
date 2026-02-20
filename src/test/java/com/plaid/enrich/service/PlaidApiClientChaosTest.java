@@ -189,9 +189,7 @@ class PlaidApiClientChaosTest {
         wireMock.stubFor(post(urlEqualTo("/enrich/transactions"))
                 .willReturn(aResponse()
                         .withStatus(500)
-                        .withBody("Error")
-                        .withRandomDelay(
-                                new com.github.tomakehurst.wiremock.stubbing.Scenario.Started())));
+                        .withBody("Error")));
 
         wireMock.stubFor(post(urlEqualTo("/enrich/transactions"))
                 .willReturn(aResponse()

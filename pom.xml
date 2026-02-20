@@ -124,12 +124,6 @@
         </dependency>
 
         <dependency>
-            <groupId>com.azure.spring</groupId>
-            <artifactId>spring-cloud-azure-starter-monitor-opentelemetry</artifactId>
-            <version>1.16.0</version> <!-- check for newer -->
-        </dependency>
-
-        <dependency>
             <groupId>com.azure</groupId>
             <artifactId>azure-monitor-opentelemetry-autoconfigure</artifactId>
             <version>1.0.0</version>

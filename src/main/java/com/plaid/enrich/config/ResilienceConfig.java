@@ -77,8 +77,7 @@ public class ResilienceConfig {
                 .onCallRejected(event -> log.warn("Bulkhead call rejected: available={}/{}",
                         bulkhead.getMetrics().getAvailableConcurrentCalls(),
                         bulkhead.getMetrics().getMaxAllowedConcurrentCalls()))
-                .onCallFinished(event -> log.debug("Bulkhead call finished: duration={}ms",
-                        event.getCallDuration()));
+                .onCallFinished(event -> log.debug("Bulkhead call finished: {}", event));
 
         return bulkhead;
     }

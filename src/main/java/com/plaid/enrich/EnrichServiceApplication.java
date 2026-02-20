@@ -2,8 +2,6 @@ package com.plaid.enrich;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
-import org.springframework.transaction.annotation.EnableTransactionManagement;
 
 /**
  * Main Spring Boot application class for Plaid Enrich Service.
@@ -18,8 +16,6 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
  * - Azure App Service deployment ready
  */
 @SpringBootApplication
-@EnableJpaRepositories
-@EnableTransactionManagement
 public class EnrichServiceApplication {
 
     public static void main(String[] args) {
