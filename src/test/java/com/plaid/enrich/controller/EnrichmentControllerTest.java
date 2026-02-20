@@ -3,6 +3,7 @@ package com.plaid.enrich.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.plaid.enrich.domain.EnrichmentRequest;
 import com.plaid.enrich.domain.EnrichmentResponse;
+import com.plaid.enrich.exception.PlaidApiException;
 import com.plaid.enrich.service.EnrichmentService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -70,7 +71,10 @@ class EnrichmentControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(invalidRequest))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.title").value("Validation Error"));
+                .andExpect(jsonPath("$.title").value("Validation Error"))
+                .andExpect(jsonPath("$.type").exists())
+                .andExpect(jsonPath("$.timestamp").exists())
+                .andExpect(jsonPath("$.errors").exists());
     }
 
     @Test
@@ -181,7 +185,46 @@ class EnrichmentControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isInternalServerError())
-                .andExpect(jsonPath("$.title").value("Internal Server Error"));
+                .andExpect(jsonPath("$.title").value("Internal Server Error"))
+                .andExpect(jsonPath("$.type").exists())
+                .andExpect(jsonPath("$.timestamp").exists());
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/enrich - Should return 502 for PlaidApiException with error details")
+    void shouldReturn502ForPlaidApiException() throws Exception {
+        // Given
+        EnrichmentRequest request = createTestRequest();
+        when(enrichmentService.enrichTransactions(any()))
+                .thenThrow(new PlaidApiException("Plaid service unavailable", 503, "PLAID_ERROR_001"));
+
+        // When/Then
+        mockMvc.perform(post("/api/v1/enrich")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.title").value("Plaid API Error"))
+                .andExpect(jsonPath("$.plaidStatusCode").value(503))
+                .andExpect(jsonPath("$.plaidErrorCode").value("PLAID_ERROR_001"))
+                .andExpect(jsonPath("$.timestamp").exists());
+    }
+
+    @Test
+    @DisplayName("POST /api/v1/enrich - Should return 400 for IllegalArgumentException")
+    void shouldReturn400ForIllegalArgumentException() throws Exception {
+        // Given
+        EnrichmentRequest request = createTestRequest();
+        when(enrichmentService.enrichTransactions(any()))
+                .thenThrow(new IllegalArgumentException("Invalid account ID format"));
+
+        // When/Then
+        mockMvc.perform(post("/api/v1/enrich")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Invalid Request"))
+                .andExpect(jsonPath("$.detail").value("Invalid account ID format"))
+                .andExpect(jsonPath("$.timestamp").exists());
     }
 
     // Helper methods

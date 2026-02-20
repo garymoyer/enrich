@@ -68,8 +68,7 @@ public class EnrichmentController {
 
         EnrichmentResponse response = enrichmentService.enrichTransactions(request);
 
-        HttpStatus status = "SUCCESS".equals(response.status()) ? HttpStatus.OK : HttpStatus.OK;
-        return ResponseEntity.status(status).body(response);
+        return ResponseEntity.ok(response);
     }
 
     /**

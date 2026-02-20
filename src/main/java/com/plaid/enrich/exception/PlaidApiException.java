@@ -39,10 +39,16 @@ public class PlaidApiException extends RuntimeException {
         this.plaidErrorCode = plaidErrorCode;
     }
 
+    /**
+     * Returns the HTTP status code returned by the Plaid API, or 0 if not applicable.
+     */
     public int getStatusCode() {
         return statusCode;
     }
 
+    /**
+     * Returns the Plaid-specific error code, or {@code null} if not present in the response.
+     */
     public String getPlaidErrorCode() {
         return plaidErrorCode;
     }

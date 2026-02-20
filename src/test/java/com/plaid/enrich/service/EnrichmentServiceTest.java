@@ -229,6 +229,126 @@ class EnrichmentServiceTest {
         assertThat(enriched.metadata()).containsKey("confidenceLevel");
     }
 
+    @Test
+    @DisplayName("Should enrich transactions in batch")
+    void shouldEnrichTransactionsBatch() {
+        // Given
+        String requestId1 = "id-batch-001";
+        String requestId2 = "id-batch-002";
+        EnrichmentRequest request = createTestRequest();
+        PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
+
+        when(guidGenerator.generate()).thenReturn(requestId1, requestId2);
+        when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
+        when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // When
+        List<EnrichmentResponse> responses = enrichmentService.enrichTransactionsBatch(
+                List.of(request, request));
+
+        // Then
+        assertThat(responses).hasSize(2);
+        assertThat(responses).allSatisfy(r -> {
+            assertThat(r.status()).isEqualTo("SUCCESS");
+            assertThat(r.enrichedTransactions()).hasSize(1);
+        });
+    }
+
+    @Test
+    @DisplayName("Should return FAILED status when retrieving a failed enrichment by ID")
+    void shouldRetrieveFailedEnrichmentById() {
+        // Given
+        String requestId = "550e8400-e29b-41d4-a716-446655440000";
+        EnrichmentEntity entity = EnrichmentEntity.builder()
+                .requestId(requestId)
+                .originalRequest("{}")
+                .status("FAILED")
+                .errorMessage("API connection refused")
+                .createdAt(OffsetDateTime.now())
+                .build();
+
+        when(enrichmentRepository.findById(requestId)).thenReturn(Optional.of(entity));
+
+        // When
+        Optional<EnrichmentResponse> response = enrichmentService.getEnrichmentById(requestId);
+
+        // Then
+        assertThat(response).isPresent();
+        assertThat(response.get().status()).isEqualTo("FAILED");
+        assertThat(response.get().errorMessage()).isEqualTo("API connection refused");
+        assertThat(response.get().enrichedTransactions()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("Should merge enrichmentMetadata into transaction metadata")
+    void shouldMergeEnrichmentMetadataIntoResponse() {
+        // Given
+        String requestId = "550e8400-e29b-41d4-a716-446655440000";
+        EnrichmentRequest request = createTestRequest();
+        PlaidEnrichResponse plaidResponse = createTestPlaidResponse(); // has enrichmentMetadata = {"location": "Seattle, WA"}
+
+        when(guidGenerator.generate()).thenReturn(requestId);
+        when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
+        when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // When
+        EnrichmentResponse response = enrichmentService.enrichTransactions(request);
+
+        // Then - enrichmentMetadata entries must be merged into the returned metadata map
+        assertThat(response.enrichedTransactions().get(0).metadata())
+                .containsKey("location")
+                .containsEntry("location", "Seattle, WA");
+    }
+
+    @Test
+    @DisplayName("Should persist Plaid response JSON on the entity after successful enrichment")
+    void shouldPersistPlaidResponseOnEntity() {
+        // Given
+        String requestId = "550e8400-e29b-41d4-a716-446655440000";
+        EnrichmentRequest request = createTestRequest();
+        PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
+
+        when(guidGenerator.generate()).thenReturn(requestId);
+        when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
+        when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // When
+        enrichmentService.enrichTransactions(request);
+
+        // Then - second save must carry the serialised Plaid response
+        ArgumentCaptor<EnrichmentEntity> entityCaptor = ArgumentCaptor.forClass(EnrichmentEntity.class);
+        verify(enrichmentRepository, times(2)).save(entityCaptor.capture());
+
+        EnrichmentEntity savedAfterResponse = entityCaptor.getAllValues().get(1);
+        assertThat(savedAfterResponse.getPlaidResponse()).isNotNull();
+        assertThat(savedAfterResponse.getStatus()).isEqualTo("SUCCESS");
+    }
+
+    @Test
+    @DisplayName("Should map all transaction fields when converting to Plaid format")
+    void shouldMapAllTransactionFieldsToPlaidFormat() {
+        // Given
+        String requestId = "550e8400-e29b-41d4-a716-446655440000";
+        EnrichmentRequest request = createTestRequest();
+        PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
+
+        when(guidGenerator.generate()).thenReturn(requestId);
+        when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
+        when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // When
+        enrichmentService.enrichTransactions(request);
+
+        // Then - individual transaction fields must be mapped, not just list size
+        ArgumentCaptor<PlaidEnrichRequest> requestCaptor = ArgumentCaptor.forClass(PlaidEnrichRequest.class);
+        verify(plaidApiClient).enrichTransactions(requestCaptor.capture());
+
+        PlaidEnrichRequest.PlaidTransaction mapped = requestCaptor.getValue().transactions().get(0);
+        assertThat(mapped).isNotNull();
+        assertThat(mapped.description()).isEqualTo("STARBUCKS COFFEE");
+        assertThat(mapped.amount()).isEqualByComparingTo(new BigDecimal("5.75"));
+    }
+
     // Helper methods
     private EnrichmentRequest createTestRequest() {
         return new EnrichmentRequest(

@@ -130,4 +130,23 @@ class GuidGeneratorTest {
         // When/Then
         assertThat(UUID.fromString(guid)).isNotNull();
     }
+
+    @Test
+    @DisplayName("Should generate UUID version 4 (version nibble must be '4')")
+    void shouldGenerateUuidVersion4() {
+        // UUID format: xxxxxxxx-xxxx-Mxxx-Nxxx-xxxxxxxxxxxx
+        // Index 14 (after two groups and their dashes) is the version nibble M
+        String guid = guidGenerator.generate();
+        assertThat(guid.charAt(14)).isEqualTo('4');
+    }
+
+    @Test
+    @DisplayName("Should generate UUID with IETF variant bits (first char of 4th group must be 8/9/a/b)")
+    void shouldGenerateUuidWithCorrectVariantBits() {
+        // UUID format: xxxxxxxx-xxxx-Mxxx-Nxxx-xxxxxxxxxxxx
+        // Index 19 (first char of the 4th group) encodes the IETF variant: must be 8, 9, a, or b
+        String guid = guidGenerator.generate();
+        char variantNibble = guid.charAt(19);
+        assertThat(variantNibble).isIn('8', '9', 'a', 'b');
+    }
 }
