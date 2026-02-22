@@ -268,6 +268,8 @@
                         --enable-preview
                         ${argLine}
                     </argLine>
+                    <!-- Performance tests are long-running; exclude from default mvn test -->
+                    <excludedGroups>performance</excludedGroups>
                 </configuration>
             </plugin>
 
@@ -369,6 +371,8 @@
                     <excludedTestClasses>
                         <!-- Chaos tests have multi-second WireMock delays; too slow for mutation runs -->
                         <param>com.plaid.enrich.service.PlaidApiClientChaosTest</param>
+                        <!-- Performance tests run for 5+ minutes; not suitable for mutation analysis -->
+                        <param>com.plaid.enrich.performance.*</param>
                     </excludedTestClasses>
                     <jvmArgs>
                         <!-- Classes compiled with enable-preview require the same flag at runtime -->
@@ -417,6 +421,28 @@
             <properties>
                 <spring.profiles.active>prod</spring.profiles.active>
             </properties>
+        </profile>
+
+        <!-- Performance Test Profile: mvn test -Pperformance -->
+        <profile>
+            <id>performance</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <argLine>
+                                --enable-preview
+                                ${argLine}
+                            </argLine>
+                            <!-- Run only @Tag("performance") tests -->
+                            <groups>performance</groups>
+                            <excludedGroups/>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
         </profile>
     </profiles>
 </project>

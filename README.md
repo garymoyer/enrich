@@ -156,6 +156,7 @@ export APPLICATIONINSIGHTS_CONNECTION_STRING="InstrumentationKey=..."
 
 - **dev**: H2 database, WireMock, debug logging
 - **test**: Testcontainers SQL Server, fast timeouts
+- **perf**: H2 database, extended Plaid timeouts, high-throughput Resilience4j limits — used exclusively by the performance test suite
 - **prod**: Azure SQL, real Plaid API, JSON logging, Application Insights
 
 ## Testing
@@ -195,6 +196,70 @@ open target/pit-reports/index.html
 ```
 
 Target: **80%+ mutation coverage**
+
+### Performance Testing
+
+The performance test suite runs against a live Plaid API instance (sandbox or dev), ramping to 100 TPS over 30 seconds then sustaining load for 5 minutes.
+
+#### Prerequisites
+
+Export credentials for the target Plaid environment before running:
+
+```bash
+export PLAID_API_BASE_URL="https://sandbox.plaid.com"
+export PLAID_API_KEY="your-api-key"
+export PLAID_CLIENT_ID="your-client-id"
+```
+
+#### Run
+
+```bash
+mvn test -Pperformance
+```
+
+Performance tests are excluded from the default `mvn test` run and must be triggered explicitly via the `performance` Maven profile.
+
+#### What runs
+
+| Phase | Duration | Target TPS |
+|-------|----------|-----------|
+| Ramp  | 30 s     | 1 → 100   |
+| Sustained | 300 s | 100      |
+
+- **Spring profile**: `perf` — H2 in-memory DB, Flyway disabled, Resilience4j tuned for high throughput, no retries (keeps metrics clean)
+- **HTTP client**: Java 21 virtual threads, one per request
+- **Test data**: 20 realistic merchant/transaction permutations, randomised per request
+
+#### Pass/fail criteria
+
+| Metric | Threshold |
+|--------|-----------|
+| Error rate | < 1% |
+| p99 response time | < 5 000 ms |
+
+The test fails the build if either threshold is breached.
+
+#### Report
+
+After each run a timestamped report is written to `target/performance-reports/` and printed to the console:
+
+```
+========================================================================
+  ENRICHMENT SERVICE PERFORMANCE TEST REPORT
+========================================================================
+  Plaid API Target  : https://sandbox.plaid.com
+  Target TPS        : 100 req/s
+  Ramp Duration     : 30 seconds
+  Sustained Duration: 300 seconds
+  Actual Duration   : 334 seconds
+
+  Total Requests    : 31,450
+  Successful        : 31,420  (99.9%)
+  Actual Avg TPS    : 94.16 req/s
+
+  p50 : 210 ms    p95 : 480 ms
+  p90 : 380 ms    p99 : 920 ms
+```
 
 ### Chaos Testing
 
