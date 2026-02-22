@@ -319,6 +319,14 @@
                             <goal>check</goal>
                         </goals>
                         <configuration>
+                            <excludes>
+                                <!-- Infrastructure/config classes not unit-testable; mirrors PIT exclusions -->
+                                <exclude>com/plaid/enrich/EnrichServiceApplication.class</exclude>
+                                <exclude>com/plaid/enrich/config/*.class</exclude>
+                                <exclude>com/plaid/enrich/service/PlaidApiClient.class</exclude>
+                                <exclude>com/plaid/enrich/domain/EnrichmentEntity.class</exclude>
+                                <exclude>com/plaid/enrich/domain/MerchantCacheEntity.class</exclude>
+                            </excludes>
                             <rules>
                                 <rule>
                                     <element>BUNDLE</element>

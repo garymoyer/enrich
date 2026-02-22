@@ -1,5 +1,6 @@
 package com.plaid.enrich.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.plaid.enrich.domain.*;
 import com.plaid.enrich.exception.PlaidApiException;
@@ -36,6 +37,9 @@ class EnrichmentServiceTest {
     private EnrichmentRepository enrichmentRepository;
 
     @Mock
+    private MerchantCacheRepository merchantCacheRepository;
+
+    @Mock
     private GuidGenerator guidGenerator;
 
     private EnrichmentService enrichmentService;
@@ -49,6 +53,7 @@ class EnrichmentServiceTest {
         enrichmentService = new EnrichmentService(
                 plaidApiClient,
                 enrichmentRepository,
+                merchantCacheRepository,
                 guidGenerator,
                 objectMapper
         );
@@ -62,7 +67,10 @@ class EnrichmentServiceTest {
         EnrichmentRequest request = createTestRequest();
         PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
 
-        when(guidGenerator.generate()).thenReturn(requestId);
+        when(guidGenerator.generate()).thenReturn(requestId, "merchant-id-001");
+        when(merchantCacheRepository.findByDescriptionAndMerchantName(any(), any()))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
         when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -76,9 +84,10 @@ class EnrichmentServiceTest {
         assertThat(response.enrichedTransactions()).hasSize(1);
         assertThat(response.enrichedTransactions().get(0).merchantName())
                 .isEqualTo("Starbucks Coffee");
+        assertThat(response.enrichedTransactions().get(0).merchantId()).isNotNull();
 
         // Verify interactions
-        verify(guidGenerator).generate();
+        verify(guidGenerator, times(2)).generate();
         verify(plaidApiClient).enrichTransactions(any());
         verify(enrichmentRepository, times(2)).save(any()); // Once for request, once for response
     }
@@ -92,6 +101,8 @@ class EnrichmentServiceTest {
         PlaidApiException exception = new PlaidApiException("API Error", 500);
 
         when(guidGenerator.generate()).thenReturn(requestId);
+        when(merchantCacheRepository.findByDescriptionAndMerchantName(any(), any()))
+                .thenReturn(Optional.empty());
         when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.error(exception));
         when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -122,7 +133,10 @@ class EnrichmentServiceTest {
         EnrichmentRequest request = createTestRequest();
         PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
 
-        when(guidGenerator.generate()).thenReturn(requestId);
+        when(guidGenerator.generate()).thenReturn(requestId, "merchant-id-001");
+        when(merchantCacheRepository.findByDescriptionAndMerchantName(any(), any()))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
         when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -144,18 +158,21 @@ class EnrichmentServiceTest {
     void shouldRetrieveEnrichmentById() throws Exception {
         // Given
         String requestId = "550e8400-e29b-41d4-a716-446655440000";
-        PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
-        String responseJson = objectMapper.writeValueAsString(plaidResponse);
+        EnrichmentRequest originalReq = createTestRequest();
+        String originalRequestJson = objectMapper.writeValueAsString(originalReq);
+
+        MerchantCacheEntity cacheEntry = buildCacheEntity("merchant-id-001");
 
         EnrichmentEntity entity = EnrichmentEntity.builder()
                 .requestId(requestId)
-                .originalRequest("{}")
-                .plaidResponse(responseJson)
+                .originalRequest(originalRequestJson)
                 .status("SUCCESS")
                 .createdAt(OffsetDateTime.now())
                 .build();
 
         when(enrichmentRepository.findById(requestId)).thenReturn(Optional.of(entity));
+        when(merchantCacheRepository.findByDescriptionAndMerchantName("STARBUCKS COFFEE", "Starbucks"))
+                .thenReturn(Optional.of(cacheEntry));
 
         // When
         Optional<EnrichmentResponse> response = enrichmentService.getEnrichmentById(requestId);
@@ -165,6 +182,7 @@ class EnrichmentServiceTest {
         assertThat(response.get().requestId()).isEqualTo(requestId);
         assertThat(response.get().status()).isEqualTo("SUCCESS");
         assertThat(response.get().enrichedTransactions()).hasSize(1);
+        assertThat(response.get().enrichedTransactions().get(0).merchantId()).isEqualTo("merchant-id-001");
     }
 
     @Test
@@ -189,7 +207,10 @@ class EnrichmentServiceTest {
         EnrichmentRequest request = createTestRequest();
         PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
 
-        when(guidGenerator.generate()).thenReturn(requestId);
+        when(guidGenerator.generate()).thenReturn(requestId, "merchant-id-001");
+        when(merchantCacheRepository.findByDescriptionAndMerchantName(any(), any()))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
         when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -213,7 +234,10 @@ class EnrichmentServiceTest {
         EnrichmentRequest request = createTestRequest();
         PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
 
-        when(guidGenerator.generate()).thenReturn(requestId);
+        when(guidGenerator.generate()).thenReturn(requestId, "merchant-id-001");
+        when(merchantCacheRepository.findByDescriptionAndMerchantName(any(), any()))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
         when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -238,7 +262,10 @@ class EnrichmentServiceTest {
         EnrichmentRequest request = createTestRequest();
         PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
 
-        when(guidGenerator.generate()).thenReturn(requestId1, requestId2);
+        when(guidGenerator.generate()).thenReturn(requestId1, requestId2, "merchant-id-001", "merchant-id-002");
+        when(merchantCacheRepository.findByDescriptionAndMerchantName(any(), any()))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
         when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -287,7 +314,10 @@ class EnrichmentServiceTest {
         EnrichmentRequest request = createTestRequest();
         PlaidEnrichResponse plaidResponse = createTestPlaidResponse(); // has enrichmentMetadata = {"location": "Seattle, WA"}
 
-        when(guidGenerator.generate()).thenReturn(requestId);
+        when(guidGenerator.generate()).thenReturn(requestId, "merchant-id-001");
+        when(merchantCacheRepository.findByDescriptionAndMerchantName(any(), any()))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
         when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -308,7 +338,10 @@ class EnrichmentServiceTest {
         EnrichmentRequest request = createTestRequest();
         PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
 
-        when(guidGenerator.generate()).thenReturn(requestId);
+        when(guidGenerator.generate()).thenReturn(requestId, "merchant-id-001");
+        when(merchantCacheRepository.findByDescriptionAndMerchantName(any(), any()))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
         when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -332,7 +365,10 @@ class EnrichmentServiceTest {
         EnrichmentRequest request = createTestRequest();
         PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
 
-        when(guidGenerator.generate()).thenReturn(requestId);
+        when(guidGenerator.generate()).thenReturn(requestId, "merchant-id-001");
+        when(merchantCacheRepository.findByDescriptionAndMerchantName(any(), any()))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
         when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -349,7 +385,219 @@ class EnrichmentServiceTest {
         assertThat(mapped.amount()).isEqualByComparingTo(new BigDecimal("5.75"));
     }
 
-    // Helper methods
+    // ── New cache-specific tests ──────────────────────────────────────────────
+
+    @Test
+    @DisplayName("Should serve from merchant cache on cache hit — Plaid is never called")
+    void shouldServeFromCacheOnCacheHit() throws Exception {
+        // Given
+        String requestId = "550e8400-e29b-41d4-a716-446655440000";
+        EnrichmentRequest request = createTestRequest();
+        MerchantCacheEntity cacheEntry = buildCacheEntity("merchant-id-cached");
+
+        when(guidGenerator.generate()).thenReturn(requestId);
+        when(merchantCacheRepository.findByDescriptionAndMerchantName("STARBUCKS COFFEE", "Starbucks"))
+                .thenReturn(Optional.of(cacheEntry));
+        when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // When
+        EnrichmentResponse response = enrichmentService.enrichTransactions(request);
+
+        // Then
+        assertThat(response.status()).isEqualTo("SUCCESS");
+        assertThat(response.enrichedTransactions()).hasSize(1);
+        assertThat(response.enrichedTransactions().get(0).merchantId()).isEqualTo("merchant-id-cached");
+
+        verify(plaidApiClient, never()).enrichTransactions(any());
+        verify(merchantCacheRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("Should call Plaid and store cache entry on cache miss")
+    void shouldCallPlaidAndStoreCacheOnCacheMiss() throws Exception {
+        // Given
+        String requestId = "550e8400-e29b-41d4-a716-446655440000";
+        EnrichmentRequest request = createTestRequest();
+        PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
+
+        when(guidGenerator.generate()).thenReturn(requestId, "merchant-id-001");
+        when(merchantCacheRepository.findByDescriptionAndMerchantName(any(), any()))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
+        when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // When
+        enrichmentService.enrichTransactions(request);
+
+        // Then
+        ArgumentCaptor<MerchantCacheEntity> cacheCaptor =
+                ArgumentCaptor.forClass(MerchantCacheEntity.class);
+        verify(merchantCacheRepository).save(cacheCaptor.capture());
+
+        MerchantCacheEntity saved = cacheCaptor.getValue();
+        assertThat(saved.getMerchantId()).isEqualTo("merchant-id-001");
+        assertThat(saved.getDescription()).isEqualTo("STARBUCKS COFFEE");
+        assertThat(saved.getMerchantName()).isEqualTo("Starbucks");
+        assertThat(saved.getPlaidResponse()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("Should handle partial cache hit — only uncached transactions go to Plaid")
+    void shouldHandlePartialCacheHit() throws Exception {
+        // Given
+        String requestId = "550e8400-e29b-41d4-a716-446655440000";
+        EnrichmentRequest request = new EnrichmentRequest(
+                "acc_12345",
+                List.of(
+                        new EnrichmentRequest.Transaction(
+                                "STARBUCKS COFFEE", new BigDecimal("5.75"),
+                                LocalDate.of(2026, 1, 30), "Starbucks"),
+                        new EnrichmentRequest.Transaction(
+                                "AMAZON PRIME", new BigDecimal("14.99"),
+                                LocalDate.of(2026, 1, 30), "Amazon")
+                )
+        );
+
+        MerchantCacheEntity cachedEntry = buildCacheEntity("merchant-id-cached");
+
+        PlaidEnrichResponse freshPlaidResponse = new PlaidEnrichResponse(
+                List.of(new PlaidEnrichResponse.PlaidEnrichedTransaction(
+                        "txn_002", "Shopping", "cat_shopping", "Amazon",
+                        "https://logo.clearbit.com/amazon.com",
+                        "https://www.amazon.com", "HIGH", null
+                )),
+                "plaid_req_002"
+        );
+
+        when(guidGenerator.generate()).thenReturn(requestId, "merchant-id-fresh");
+        // First tx is a cache hit, second is a miss
+        when(merchantCacheRepository.findByDescriptionAndMerchantName("STARBUCKS COFFEE", "Starbucks"))
+                .thenReturn(Optional.of(cachedEntry));
+        when(merchantCacheRepository.findByDescriptionAndMerchantName("AMAZON PRIME", "Amazon"))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(freshPlaidResponse));
+        when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // When
+        EnrichmentResponse response = enrichmentService.enrichTransactions(request);
+
+        // Then — two enriched transactions with distinct merchantIds
+        assertThat(response.status()).isEqualTo("SUCCESS");
+        assertThat(response.enrichedTransactions()).hasSize(2);
+
+        List<String> merchantIds = response.enrichedTransactions().stream()
+                .map(EnrichmentResponse.EnrichedTransaction::merchantId)
+                .toList();
+        assertThat(merchantIds).containsExactly("merchant-id-cached", "merchant-id-fresh");
+
+        // Plaid called with only the 1 uncached transaction
+        ArgumentCaptor<PlaidEnrichRequest> plaidCaptor = ArgumentCaptor.forClass(PlaidEnrichRequest.class);
+        verify(plaidApiClient).enrichTransactions(plaidCaptor.capture());
+        assertThat(plaidCaptor.getValue().transactions()).hasSize(1);
+        assertThat(plaidCaptor.getValue().transactions().get(0).description()).isEqualTo("AMAZON PRIME");
+    }
+
+    @Test
+    @DisplayName("Should return merchantId from cache in getEnrichmentById")
+    void shouldReturnMerchantIdFromCacheInGetById() throws Exception {
+        // Given
+        String requestId = "550e8400-e29b-41d4-a716-446655440000";
+        EnrichmentRequest originalReq = createTestRequest();
+        String originalRequestJson = objectMapper.writeValueAsString(originalReq);
+
+        MerchantCacheEntity cacheEntry = buildCacheEntity("merchant-id-from-cache");
+
+        EnrichmentEntity entity = EnrichmentEntity.builder()
+                .requestId(requestId)
+                .originalRequest(originalRequestJson)
+                .status("SUCCESS")
+                .createdAt(OffsetDateTime.now())
+                .build();
+
+        when(enrichmentRepository.findById(requestId)).thenReturn(Optional.of(entity));
+        when(merchantCacheRepository.findByDescriptionAndMerchantName("STARBUCKS COFFEE", "Starbucks"))
+                .thenReturn(Optional.of(cacheEntry));
+
+        // When
+        Optional<EnrichmentResponse> response = enrichmentService.getEnrichmentById(requestId);
+
+        // Then
+        assertThat(response).isPresent();
+        assertThat(response.get().status()).isEqualTo("SUCCESS");
+        assertThat(response.get().enrichedTransactions()).hasSize(1);
+        assertThat(response.get().enrichedTransactions().get(0).merchantId())
+                .isEqualTo("merchant-id-from-cache");
+
+        verify(plaidApiClient, never()).enrichTransactions(any());
+    }
+
+    @Test
+    @DisplayName("Should coerce null merchantName to empty string for cache key")
+    void shouldHandleNullMerchantName() {
+        // Given — transaction has no merchantName
+        String requestId = "550e8400-e29b-41d4-a716-446655440000";
+        EnrichmentRequest request = new EnrichmentRequest(
+                "acc_12345",
+                List.of(new EnrichmentRequest.Transaction(
+                        "STARBUCKS COFFEE",
+                        new BigDecimal("5.75"),
+                        LocalDate.of(2026, 1, 30),
+                        null  // null merchantName — triggers nvl() null branch
+                ))
+        );
+        PlaidEnrichResponse plaidResponse = createTestPlaidResponse();
+
+        when(guidGenerator.generate()).thenReturn(requestId, "merchant-id-001");
+        // Cache keyed on ("STARBUCKS COFFEE", "") — empty string, not null
+        when(merchantCacheRepository.findByDescriptionAndMerchantName("STARBUCKS COFFEE", ""))
+                .thenReturn(Optional.empty());
+        when(merchantCacheRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(plaidApiClient.enrichTransactions(any())).thenReturn(Mono.just(plaidResponse));
+        when(enrichmentRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        // When
+        EnrichmentResponse response = enrichmentService.enrichTransactions(request);
+
+        // Then
+        assertThat(response.status()).isEqualTo("SUCCESS");
+        assertThat(response.enrichedTransactions()).hasSize(1);
+        assertThat(response.enrichedTransactions().get(0).merchantId()).isEqualTo("merchant-id-001");
+
+        // Cache was saved with empty-string merchantName
+        ArgumentCaptor<MerchantCacheEntity> cacheCaptor =
+                ArgumentCaptor.forClass(MerchantCacheEntity.class);
+        verify(merchantCacheRepository).save(cacheCaptor.capture());
+        assertThat(cacheCaptor.getValue().getMerchantName()).isEqualTo("");
+    }
+
+    @Test
+    @DisplayName("Should return empty enriched list when stored request has null transactions")
+    void shouldReturnEmptyListWhenStoredRequestHasNullTransactions() throws Exception {
+        // Given — SUCCESS entity whose originalRequest deserialises to a null transactions field
+        String requestId = "550e8400-e29b-41d4-a716-446655440000";
+        EnrichmentEntity entity = EnrichmentEntity.builder()
+                .requestId(requestId)
+                .originalRequest("{}")   // deserialises to EnrichmentRequest(null, null)
+                .status("SUCCESS")
+                .createdAt(OffsetDateTime.now())
+                .build();
+
+        when(enrichmentRepository.findById(requestId)).thenReturn(Optional.of(entity));
+
+        // When
+        Optional<EnrichmentResponse> response = enrichmentService.getEnrichmentById(requestId);
+
+        // Then — null transactions are handled gracefully; no Plaid call
+        assertThat(response).isPresent();
+        assertThat(response.get().status()).isEqualTo("SUCCESS");
+        assertThat(response.get().enrichedTransactions()).isEmpty();
+        verify(merchantCacheRepository, never()).findByDescriptionAndMerchantName(any(), any());
+    }
+
+    // ── Helper methods ────────────────────────────────────────────────────────
+
     private EnrichmentRequest createTestRequest() {
         return new EnrichmentRequest(
                 "acc_12345",
@@ -376,5 +624,23 @@ class EnrichmentServiceTest {
                 )),
                 "plaid_550e8400-e29b-41d4-a716-446655440000"
         );
+    }
+
+    /**
+     * Builds a pre-populated MerchantCacheEntity whose plaid_response JSON matches
+     * the data returned by {@link #createTestPlaidResponse()}.
+     */
+    private MerchantCacheEntity buildCacheEntity(String merchantId) throws JsonProcessingException {
+        PlaidEnrichResponse.PlaidEnrichedTransaction plaidTx =
+                createTestPlaidResponse().enrichedTransactions().get(0);
+        String plaidTxJson = objectMapper.writeValueAsString(plaidTx);
+
+        MerchantCacheEntity entity = new MerchantCacheEntity();
+        entity.setMerchantId(merchantId);
+        entity.setDescription("STARBUCKS COFFEE");
+        entity.setMerchantName("Starbucks");
+        entity.setPlaidResponse(plaidTxJson);
+        entity.setCreatedAt(OffsetDateTime.now());
+        return entity;
     }
 }

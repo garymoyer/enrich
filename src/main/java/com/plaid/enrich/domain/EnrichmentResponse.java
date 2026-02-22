@@ -51,6 +51,10 @@ public record EnrichmentResponse(
         @Schema(description = "Transaction identifier", example = "txn_1")
         String transactionId,
 
+        @Schema(description = "Stable merchant UUID from local cache",
+                example = "550e8400-e29b-41d4-a716-446655440001")
+        String merchantId,
+
         @Schema(description = "Plaid-determined category", example = "Food & Drink")
         String category,
 

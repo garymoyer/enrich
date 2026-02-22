@@ -39,4 +39,24 @@ class PlaidApiExceptionTest {
         assertThat(str).contains("502");
         assertThat(str).contains("INVALID_REQUEST");
     }
+
+    @Test
+    @DisplayName("Should wrap a cause with message only")
+    void shouldWrapCauseWithMessageOnly() {
+        Throwable cause = new RuntimeException("root cause");
+        PlaidApiException ex = new PlaidApiException("error", cause);
+        assertThat(ex.getCause()).isSameAs(cause);
+        assertThat(ex.getStatusCode()).isZero();
+        assertThat(ex.getPlaidErrorCode()).isNull();
+    }
+
+    @Test
+    @DisplayName("Should wrap a cause with all fields")
+    void shouldWrapCauseWithAllFields() {
+        Throwable cause = new RuntimeException("root cause");
+        PlaidApiException ex = new PlaidApiException("error", 503, "PLAID_ERROR_002", cause);
+        assertThat(ex.getCause()).isSameAs(cause);
+        assertThat(ex.getStatusCode()).isEqualTo(503);
+        assertThat(ex.getPlaidErrorCode()).isEqualTo("PLAID_ERROR_002");
+    }
 }

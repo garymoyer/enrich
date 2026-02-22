@@ -57,7 +57,8 @@ class EnrichmentControllerTest {
                 .andExpect(jsonPath("$.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.enrichedTransactions").isArray())
                 .andExpect(jsonPath("$.enrichedTransactions", hasSize(1)))
-                .andExpect(jsonPath("$.enrichedTransactions[0].merchantName").value("Starbucks Coffee"));
+                .andExpect(jsonPath("$.enrichedTransactions[0].merchantName").value("Starbucks Coffee"))
+                .andExpect(jsonPath("$.enrichedTransactions[0].merchantId").value("merchant-id-001"));
     }
 
     @Test
@@ -148,7 +149,8 @@ class EnrichmentControllerTest {
         mockMvc.perform(get("/api/v1/enrich/{requestId}", requestId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.requestId").value(requestId))
-                .andExpect(jsonPath("$.status").value("SUCCESS"));
+                .andExpect(jsonPath("$.status").value("SUCCESS"))
+                .andExpect(jsonPath("$.enrichedTransactions[0].merchantId").value("merchant-id-001"));
     }
 
     @Test
@@ -245,6 +247,7 @@ class EnrichmentControllerTest {
                 "550e8400-e29b-41d4-a716-446655440000",
                 List.of(new EnrichmentResponse.EnrichedTransaction(
                         "txn_001",
+                        "merchant-id-001",
                         "Food & Drink",
                         "Starbucks Coffee",
                         "https://logo.clearbit.com/starbucks.com",
