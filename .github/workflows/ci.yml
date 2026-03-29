@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  test:
+    name: Build & Test (Java 21)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Run tests with coverage check
+        # dev profile uses H2 in-memory DB — no SQL Server container required.
+        # 'verify' runs unit tests + JaCoCo coverage check (90% instruction/branch minimum).
+        # Performance tests are excluded by default via <excludedGroups>performance</excludedGroups>.
+        run: mvn verify -Dspring.profiles.active=dev --no-transfer-progress
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: target/surefire-reports/
+          retention-days: 14
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage
+          path: target/site/jacoco/
+          retention-days: 14
+
+      - name: Upload JAR
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: enrich-service-jar
+          path: target/enrich-service-*.jar
+          retention-days: 7
+
+  mutation:
+    name: Mutation Testing (PIT)
+    runs-on: ubuntu-latest
+    # Run mutation testing only on pushes to main/master, not on every PR
+    if: github.event_name == 'push'
+    needs: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'maven'
+
+      - name: Run PIT mutation testing
+        run: mvn test-compile org.pitest:pitest-maven:mutationCoverage
+              -Dspring.profiles.active=dev
+              --no-transfer-progress
+
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pitest-report
+          path: target/pit-reports/
+          retention-days: 14
