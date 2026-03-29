@@ -125,6 +125,18 @@ class MerchantMemoryCacheTest {
         assertThat(cache.size()).isZero();
     }
 
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    private MerchantCacheEntity buildEntity(String merchantId, String description, String merchantName) {
+        MerchantCacheEntity e = new MerchantCacheEntity();
+        e.setMerchantId(merchantId);
+        e.setDescription(description);
+        e.setMerchantName(merchantName);
+        e.setStatus("ENRICHED");
+        e.setCreatedAt(OffsetDateTime.now());
+        return e;
+    }
+
     @Test
     @DisplayName("initialize loads all DB records into cache at startup")
     void initializeLoadsDatabaseRecords() {
@@ -169,6 +181,44 @@ class MerchantMemoryCacheTest {
         assertThat(result.created()).isTrue();
         assertThat(result.entry().merchantId()).isEqualTo("mid-b");
         assertThat(tinyCache.size()).isEqualTo(1); // still 1 — SLOT_B was not inserted
+    }
+
+    @Test
+    @DisplayName("buildKey handles null description and null merchantName")
+    void buildKeyHandlesNulls() {
+        assertThat(MerchantMemoryCache.buildKey(null, "Starbucks")).isEqualTo("|starbucks");
+        assertThat(MerchantMemoryCache.buildKey("STARBUCKS", null)).isEqualTo("starbucks|");
+    }
+
+    @Test
+    @DisplayName("initialize stops loading when DB record count exceeds maxSize")
+    void initializeTruncatesAtMaxSize() {
+        MerchantCacheEntity e1 = buildEntity("mid-1", "DESC_A", "Name A");
+        MerchantCacheEntity e2 = buildEntity("mid-2", "DESC_B", "Name B");
+        when(repository.findAll()).thenReturn(List.of(e1, e2));
+
+        EnrichCacheProperties props = new EnrichCacheProperties();
+        props.setMaxSize(1);
+        MerchantMemoryCache tinyCache = new MerchantMemoryCache(props, repository);
+        tinyCache.initialize();
+
+        assertThat(tinyCache.size()).isEqualTo(1); // second record skipped
+    }
+
+    @Test
+    @DisplayName("put skips insertion when cache is already at maxSize")
+    void putSkipsInsertWhenFull() {
+        EnrichCacheProperties props = new EnrichCacheProperties();
+        props.setMaxSize(1);
+        when(repository.findAll()).thenReturn(List.of());
+        MerchantMemoryCache tinyCache = new MerchantMemoryCache(props, repository);
+        tinyCache.initialize();
+
+        tinyCache.put(new MerchantCacheEntry("mid-1", "FIRST", "First", null, "PENDING"));
+        assertThat(tinyCache.size()).isEqualTo(1);
+
+        tinyCache.put(new MerchantCacheEntry("mid-2", "SECOND", "Second", null, "PENDING"));
+        assertThat(tinyCache.size()).isEqualTo(1); // second put was ignored
     }
 
     @Test

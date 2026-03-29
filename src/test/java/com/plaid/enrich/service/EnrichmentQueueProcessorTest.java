@@ -154,6 +154,19 @@ class EnrichmentQueueProcessorTest {
     }
 
     @Test
+    @DisplayName("null response from Mono.empty() is handled gracefully without updating DB or cache")
+    void nullResponseFromMonoEmptyHandledGracefully() throws Exception {
+        when(plaidApiClient.enrichTransactions(any()))
+                .thenReturn(Mono.<PlaidEnrichResponse>empty());
+
+        processor.enqueue(SAMPLE_TASK);
+        Thread.sleep(500);
+
+        verify(merchantCacheRepository, never()).save(any());
+        verify(memoryCache, never()).update(any(), any(), any());
+    }
+
+    @Test
     @DisplayName("queueSize reflects pending task count")
     void queueSizeReflectsPendingTasks() {
         // Workers are running, but Plaid is not mocked — tasks will fail quickly
