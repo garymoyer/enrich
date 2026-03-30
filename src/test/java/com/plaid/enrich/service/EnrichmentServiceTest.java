@@ -324,6 +324,50 @@ class EnrichmentServiceTest {
         verify(queueProcessor, times(1)).enqueue(any());
     }
 
+    // ── persistStatus ────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("persistStatus sets status=SUCCESS and clears errorMessage in DB on success")
+    void persistStatusSetsSuccessStatusInDb() {
+        String requestId = "req-persist-ok";
+        when(guidGenerator.generate()).thenReturn(requestId);
+        when(enrichmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(enrichmentRepository.findById(requestId)).thenReturn(Optional.of(buildPendingEntity(requestId)));
+
+        MerchantCacheEntry pending =
+                new MerchantCacheEntry("mid-ok", "STARBUCKS COFFEE", "Starbucks", null, "PENDING");
+        when(memoryCache.getOrCreate(any(), any(), any()))
+                .thenReturn(new MerchantMemoryCache.GetOrCreateResult(pending, false));
+
+        enrichmentService.enrichTransactions(createTestRequest());
+
+        ArgumentCaptor<EnrichmentEntity> captor = ArgumentCaptor.forClass(EnrichmentEntity.class);
+        verify(enrichmentRepository, times(2)).save(captor.capture());
+        EnrichmentEntity updated = captor.getAllValues().get(1);
+        assertThat(updated.getStatus()).isEqualTo("SUCCESS");
+        assertThat(updated.getErrorMessage()).isNull();
+    }
+
+    @Test
+    @DisplayName("persistStatus sets status=FAILED and records errorMessage in DB on exception")
+    void persistStatusSetsFailedStatusInDb() {
+        String requestId = "req-persist-fail";
+        when(guidGenerator.generate()).thenReturn(requestId);
+        when(enrichmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(enrichmentRepository.findById(requestId)).thenReturn(Optional.of(buildPendingEntity(requestId)));
+
+        when(memoryCache.getOrCreate(any(), any(), any()))
+                .thenThrow(new RuntimeException("DB failure"));
+
+        enrichmentService.enrichTransactions(createTestRequest());
+
+        ArgumentCaptor<EnrichmentEntity> captor = ArgumentCaptor.forClass(EnrichmentEntity.class);
+        verify(enrichmentRepository, times(2)).save(captor.capture());
+        EnrichmentEntity updated = captor.getAllValues().get(1);
+        assertThat(updated.getStatus()).isEqualTo("FAILED");
+        assertThat(updated.getErrorMessage()).contains("DB failure");
+    }
+
     // ── batch enrichment ─────────────────────────────────────────────────────
 
     @Test
@@ -347,6 +391,25 @@ class EnrichmentServiceTest {
             assertThat(r.status()).isEqualTo("SUCCESS");
             assertThat(r.enrichedTransactions()).hasSize(1);
         });
+    }
+
+    @Test
+    @DisplayName("Batch enrichment: persistRequest is called for each item (2 requests → 4 total saves)")
+    void batchEnrichmentPersistsEachRequest() {
+        when(guidGenerator.generate()).thenReturn("req-b1", "req-b2");
+        when(enrichmentRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(enrichmentRepository.findById(any())).thenAnswer(inv ->
+                Optional.of(buildPendingEntity(inv.getArgument(0))));
+
+        MerchantCacheEntry pending =
+                new MerchantCacheEntry("mid-b", "STARBUCKS COFFEE", "Starbucks", null, "PENDING");
+        when(memoryCache.getOrCreate(any(), any(), any()))
+                .thenReturn(new MerchantMemoryCache.GetOrCreateResult(pending, false));
+
+        enrichmentService.enrichTransactionsBatch(List.of(createTestRequest(), createTestRequest()));
+
+        // 2 requests × (1 persistRequest + 1 persistStatus) = 4 DB saves
+        verify(enrichmentRepository, times(4)).save(any());
     }
 
     // ── getEnrichmentById ────────────────────────────────────────────────────

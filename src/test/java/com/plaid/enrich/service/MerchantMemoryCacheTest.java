@@ -118,6 +118,13 @@ class MerchantMemoryCacheTest {
     }
 
     @Test
+    @DisplayName("isPending returns true for a PENDING entry")
+    void isPendingReturnsTrueForPendingEntry() {
+        MerchantCacheEntry entry = new MerchantCacheEntry("mid-p", "DESC", "Name", null, "PENDING");
+        assertThat(entry.isPending()).isTrue();
+    }
+
+    @Test
     @DisplayName("update is a no-op when key is absent")
     void updateIsNoopForAbsentKey() {
         // Should not throw

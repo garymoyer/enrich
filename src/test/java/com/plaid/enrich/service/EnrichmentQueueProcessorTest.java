@@ -3,6 +3,7 @@ package com.plaid.enrich.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.plaid.enrich.config.EnrichCacheProperties;
 import com.plaid.enrich.domain.MerchantCacheEntity;
+import com.plaid.enrich.domain.PlaidEnrichRequest;
 import com.plaid.enrich.domain.PlaidEnrichResponse;
 import com.plaid.enrich.exception.PlaidApiException;
 import org.junit.jupiter.api.BeforeEach;
@@ -121,6 +122,15 @@ class EnrichmentQueueProcessorTest {
         // Memory cache updated
         verify(memoryCache).update(
                 eq("STARBUCKS COFFEE"), eq("Starbucks"), contains("Starbucks Coffee"));
+
+        // Plaid request was non-null and carried the correct description
+        ArgumentCaptor<PlaidEnrichRequest> plaidCaptor =
+                ArgumentCaptor.forClass(PlaidEnrichRequest.class);
+        verify(plaidApiClient).enrichTransactions(plaidCaptor.capture());
+        assertThat(plaidCaptor.getValue()).isNotNull();
+        assertThat(plaidCaptor.getValue().transactions()).hasSize(1);
+        assertThat(plaidCaptor.getValue().transactions().get(0).description())
+                .isEqualTo("STARBUCKS COFFEE");
     }
 
     @Test

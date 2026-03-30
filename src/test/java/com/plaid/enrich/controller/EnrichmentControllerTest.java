@@ -75,7 +75,8 @@ class EnrichmentControllerTest {
                 .andExpect(jsonPath("$.title").value("Validation Error"))
                 .andExpect(jsonPath("$.type").exists())
                 .andExpect(jsonPath("$.timestamp").exists())
-                .andExpect(jsonPath("$.errors").exists());
+                .andExpect(jsonPath("$.errors").exists())
+                .andExpect(jsonPath("$.errors.accountId").exists());
     }
 
     @Test
@@ -206,6 +207,7 @@ class EnrichmentControllerTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.title").value("Plaid API Error"))
+                .andExpect(jsonPath("$.type").value("https://plaid.com/docs/errors"))
                 .andExpect(jsonPath("$.plaidStatusCode").value(503))
                 .andExpect(jsonPath("$.plaidErrorCode").value("PLAID_ERROR_001"))
                 .andExpect(jsonPath("$.timestamp").exists());
