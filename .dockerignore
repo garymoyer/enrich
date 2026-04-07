@@ -1,0 +1,55 @@
+# Target folder (compiled artifacts)
+target/
+!target/*.jar
+
+# IDE files
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+docs/
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+azure-pipelines.yml
+
+# Testing
+test-results/
+coverage/
+*.pid
+
+# Logs
+*.log
+logs/
+
+# Environment files
+.env
+.env.*
+application-local.yml
+
+# Maven
+.mvn/wrapper/maven-wrapper.jar
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~

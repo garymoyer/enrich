@@ -3,14 +3,12 @@ package com.plaid.enrich.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.plaid.enrich.domain.*;
+import com.plaid.enrich.exception.PlaidApiException;
 import com.plaid.enrich.util.GuidGenerator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionTemplate;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -20,91 +18,80 @@ import java.util.stream.Collectors;
 
 /**
  * Service for orchestrating transaction enrichment.
- *
- * <h3>Hot-path design</h3>
- * <p>All enrichment requests go through the in-memory {@link MerchantMemoryCache}:
- * <ul>
- *   <li><b>Cache hit (ENRICHED)</b> — returns the stored Plaid data immediately.
- *       Plaid is never called. Latency is O(1) hash lookup, typically sub-microsecond.</li>
- *   <li><b>Cache hit (PENDING)</b> — a prior request already created a stub but Plaid hasn't
- *       responded yet. Returns the stub merchantId instantly; the caller receives PENDING metadata.</li>
- *   <li><b>Cache miss</b> — atomically creates a PENDING stub in both the DB and the memory cache
- *       (via {@link MerchantMemoryCache#getOrCreate}), returns the new merchantId instantly, then
- *       enqueues a background {@link EnrichmentQueueProcessor.EnrichmentTask}. The queue processor
- *       calls Plaid asynchronously and updates DB + cache on completion.</li>
- * </ul>
- *
- * <h3>Latency logging</h3>
- * <p>Each transaction logs {@code [CACHE HIT]} or {@code [CACHE MISS]} with latency in nanoseconds
- * so cache performance is visible in structured logs and test output.
- *
- * <h3>Atomicity of stub creation</h3>
- * <p>The DB stub is committed in its own {@code REQUIRES_NEW} transaction before the cache entry
- * is visible. This ensures that a restart after a crash will not leave orphaned in-memory entries.
+ * Responsibilities:
+ * - Generate GUID for each request
+ * - Check local merchant cache before calling Plaid API
+ * - Call Plaid API via PlaidApiClient only for cache misses
+ * - Persist merchant cache entries keyed on (description, merchantName)
+ * - Persist request/response pairs
+ * - Map between domain models
+ * - Handle both single and batch requests
  */
 @Service
 @Slf4j
 public class EnrichmentService {
 
+    private final PlaidApiClient plaidApiClient;
     private final EnrichmentRepository enrichmentRepository;
     private final MerchantCacheRepository merchantCacheRepository;
-    private final MerchantMemoryCache memoryCache;
-    private final EnrichmentQueueProcessor queueProcessor;
     private final GuidGenerator guidGenerator;
     private final ObjectMapper objectMapper;
-    /** Separate transaction for stub creation so it commits before we return to the caller. */
-    private final TransactionTemplate requiresNewTx;
 
-    public EnrichmentService(EnrichmentRepository enrichmentRepository,
+    public EnrichmentService(PlaidApiClient plaidApiClient,
+                             EnrichmentRepository enrichmentRepository,
                              MerchantCacheRepository merchantCacheRepository,
-                             MerchantMemoryCache memoryCache,
-                             EnrichmentQueueProcessor queueProcessor,
                              GuidGenerator guidGenerator,
-                             ObjectMapper objectMapper,
-                             PlatformTransactionManager transactionManager) {
+                             ObjectMapper objectMapper) {
+        this.plaidApiClient = plaidApiClient;
         this.enrichmentRepository = enrichmentRepository;
         this.merchantCacheRepository = merchantCacheRepository;
-        this.memoryCache = memoryCache;
-        this.queueProcessor = queueProcessor;
         this.guidGenerator = guidGenerator;
         this.objectMapper = objectMapper;
-        TransactionTemplate tx = new TransactionTemplate(transactionManager);
-        tx.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        this.requiresNewTx = tx;
     }
-
-    // ── Public API ───────────────────────────────────────────────────────────
 
     /**
      * Enriches transactions for a single request.
-     * Returns immediately after resolving merchantIds from cache/stub — no blocking Plaid call.
+     * Cache hits skip Plaid entirely; misses call Plaid, populate the cache, then return.
+     *
+     * @param request the enrichment request from client
+     * @return enrichment response with GUID and enriched data
      */
     @Transactional
     public EnrichmentResponse enrichTransactions(EnrichmentRequest request) {
         String requestId = guidGenerator.generate();
-        log.info("Starting enrichment for requestId={}", requestId);
+        log.info("Starting enrichment for request: {}", requestId);
+
         try {
             persistRequest(requestId, request, "PENDING");
             EnrichmentResponse response = enrichCore(requestId, request);
-            log.info("Completed enrichment for requestId={} transactions={}", requestId,
-                    response.enrichedTransactions().size());
+            log.info("Successfully enriched request: {}", requestId);
             return response;
+
         } catch (Exception ex) {
-            log.error("Error enriching requestId={}", requestId, ex);
-            persistStatus(requestId, "FAILED", ex.getMessage());
-            return new EnrichmentResponse(requestId, List.of(), OffsetDateTime.now(), "FAILED", ex.getMessage());
+            log.error("Error enriching request: {}", requestId, ex);
+            persistResponse(requestId, request, null, "FAILED", ex.getMessage());
+            return new EnrichmentResponse(
+                    requestId,
+                    List.of(),
+                    OffsetDateTime.now(),
+                    "FAILED",
+                    ex.getMessage()
+            );
         }
     }
 
     /**
      * Enriches multiple transaction batches in parallel.
-     * Each batch gets its own requestId and is processed independently.
+     * Each batch gets its own GUID and is processed independently.
+     *
+     * @param requests list of enrichment requests
+     * @return list of enrichment responses
      */
     @Transactional
     public List<EnrichmentResponse> enrichTransactionsBatch(List<EnrichmentRequest> requests) {
         log.info("Starting batch enrichment for {} requests", requests.size());
 
-        List<BatchItem> items = requests.stream()
+        List<BatchItem> batchItems = requests.stream()
                 .map(req -> {
                     String requestId = guidGenerator.generate();
                     persistRequest(requestId, req, "PENDING");
@@ -112,7 +99,7 @@ public class EnrichmentService {
                 })
                 .collect(Collectors.toList());
 
-        List<EnrichmentResponse> responses = Flux.fromIterable(items)
+        List<EnrichmentResponse> responses = Flux.fromIterable(batchItems)
                 .flatMap(item -> processBatchItem(item))
                 .collectList()
                 .block();
@@ -120,25 +107,35 @@ public class EnrichmentService {
         log.info("Completed batch enrichment: {}/{} successful",
                 responses.stream().filter(r -> "SUCCESS".equals(r.status())).count(),
                 responses.size());
+
         return responses;
     }
 
     /**
-     * Retrieves an enrichment record by requestId.
-     * Uses the memory cache for transaction lookup; falls back to DB when entries were evicted.
+     * Retrieves an enrichment record by GUID.
+     * For SUCCESS records, reconstructs enriched transactions from the merchant cache
+     * using the original request's (description, merchantName) pairs.
+     *
+     * @param requestId the GUID to look up
+     * @return optional enrichment response
      */
     @Transactional(readOnly = true)
     public Optional<EnrichmentResponse> getEnrichmentById(String requestId) {
         log.debug("Retrieving enrichment record: {}", requestId);
+
         return enrichmentRepository.findById(requestId)
                 .map(entity -> {
                     if ("SUCCESS".equals(entity.getStatus())) {
                         try {
                             EnrichmentRequest originalRequest = objectMapper.readValue(
-                                    entity.getOriginalRequest(), EnrichmentRequest.class);
+                                    entity.getOriginalRequest(),
+                                    EnrichmentRequest.class
+                            );
+                            List<EnrichmentResponse.EnrichedTransaction> enrichedTransactions =
+                                    buildEnrichedTransactionsFromCache(originalRequest);
                             return new EnrichmentResponse(
                                     requestId,
-                                    buildEnrichedTransactionsFromCache(originalRequest),
+                                    enrichedTransactions,
                                     entity.getCreatedAt(),
                                     "SUCCESS"
                             );
@@ -146,169 +143,219 @@ public class EnrichmentService {
                             log.error("Error parsing stored request for {}", requestId, e);
                             throw new RuntimeException("Error retrieving enrichment data", e);
                         }
+                    } else {
+                        return new EnrichmentResponse(
+                                requestId,
+                                List.of(),
+                                entity.getCreatedAt(),
+                                entity.getStatus(),
+                                entity.getErrorMessage()
+                        );
                     }
-                    return new EnrichmentResponse(
-                            requestId, List.of(), entity.getCreatedAt(),
-                            entity.getStatus(), entity.getErrorMessage()
-                    );
                 });
     }
 
-    // ── Core enrichment ──────────────────────────────────────────────────────
-
     /**
-     * Resolves a merchantId for every transaction via the memory cache.
-     * New merchants get a PENDING stub committed atomically before the method returns.
+     * Core enrichment logic shared by single and batch flows.
+     * Checks the merchant cache for each transaction; misses call Plaid and populate the cache.
+     * Calls persistResponse(SUCCESS) at the end.
      */
     private EnrichmentResponse enrichCore(String requestId, EnrichmentRequest request) {
-        List<EnrichmentResponse.EnrichedTransaction> enrichedTransactions = new ArrayList<>();
+        Map<String, MerchantCacheEntity> cacheHits = new HashMap<>();
+        List<EnrichmentRequest.Transaction> uncachedTransactions = new ArrayList<>();
 
         for (EnrichmentRequest.Transaction tx : request.transactions()) {
-            long start = System.nanoTime();
             String mn = nvl(tx.merchantName());
-
-            MerchantMemoryCache.GetOrCreateResult result =
-                    memoryCache.getOrCreate(tx.description(), mn, () -> createStub(tx.description(), mn));
-
-            MerchantCacheEntry entry = result.entry();
-            long latencyNs = System.nanoTime() - start;
-
-            if (result.created()) {
-                log.info("[CACHE MISS] desc={} merchantId={} keyLatencyNs={}",
-                        tx.description(), entry.merchantId(), latencyNs);
-                queueProcessor.enqueue(new EnrichmentQueueProcessor.EnrichmentTask(
-                        entry.merchantId(), tx.description(), mn,
-                        tx.amount(), tx.date(), request.accountId()
-                ));
+            Optional<MerchantCacheEntity> cached =
+                    merchantCacheRepository.findByDescriptionAndMerchantName(tx.description(), mn);
+            if (cached.isPresent()) {
+                cacheHits.put(cacheKey(tx.description(), mn), cached.get());
             } else {
-                log.info("[CACHE HIT] desc={} merchantId={} status={} latencyNs={}",
-                        tx.description(), entry.merchantId(), entry.status(), latencyNs);
+                uncachedTransactions.add(tx);
             }
-
-            enrichedTransactions.add(buildEnrichedTransaction(tx, entry));
         }
 
-        persistStatus(requestId, "SUCCESS", null);
+        PlaidEnrichResponse plaidResponse = null;
+        Map<String, MerchantCacheEntity> freshEntries = new HashMap<>();
+
+        if (!uncachedTransactions.isEmpty()) {
+            PlaidEnrichRequest plaidRequest = mapToPlaidRequest(request.accountId(), uncachedTransactions);
+            plaidResponse = plaidApiClient.enrichTransactions(plaidRequest).block();
+
+            if (plaidResponse == null) {
+                throw new PlaidApiException("Plaid API returned null response");
+            }
+
+            for (int i = 0; i < uncachedTransactions.size(); i++) {
+                EnrichmentRequest.Transaction tx = uncachedTransactions.get(i);
+                PlaidEnrichResponse.PlaidEnrichedTransaction plaidTx =
+                        plaidResponse.enrichedTransactions().get(i);
+                String mn = nvl(tx.merchantName());
+                String merchantId = guidGenerator.generate();
+
+                try {
+                    String plaidTxJson = objectMapper.writeValueAsString(plaidTx);
+                    MerchantCacheEntity cacheEntry = MerchantCacheEntity.builder()
+                            .merchantId(merchantId)
+                            .description(tx.description())
+                            .merchantName(mn)
+                            .plaidResponse(plaidTxJson)
+                            .createdAt(OffsetDateTime.now())
+                            .build();
+                    merchantCacheRepository.save(cacheEntry);
+                    freshEntries.put(cacheKey(tx.description(), mn), cacheEntry);
+                } catch (DataIntegrityViolationException e) {
+                    // Concurrent insert: another thread won the race — re-query to get the winner's entry
+                    log.debug("Cache insert race detected for ({}, {}); re-querying", tx.description(), mn);
+                    MerchantCacheEntity winner = merchantCacheRepository
+                            .findByDescriptionAndMerchantName(tx.description(), mn)
+                            .orElseThrow(() -> new RuntimeException(
+                                    "Cache entry disappeared after concurrent insert race"));
+                    freshEntries.put(cacheKey(tx.description(), mn), winner);
+                } catch (JsonProcessingException e) {
+                    log.error("Error serializing Plaid transaction for cache", e);
+                    throw new RuntimeException("Error persisting merchant cache entry", e);
+                }
+            }
+        }
+
+        persistResponse(requestId, request, plaidResponse, "SUCCESS", null);
+
+        // Assemble response preserving original transaction order
+        List<EnrichmentResponse.EnrichedTransaction> enrichedTransactions = new ArrayList<>();
+        for (EnrichmentRequest.Transaction tx : request.transactions()) {
+            String mn = nvl(tx.merchantName());
+            String key = cacheKey(tx.description(), mn);
+            MerchantCacheEntity cacheEntry = cacheHits.containsKey(key)
+                    ? cacheHits.get(key)
+                    : freshEntries.get(key);
+
+            if (cacheEntry != null) {
+                try {
+                    PlaidEnrichResponse.PlaidEnrichedTransaction enriched = objectMapper.readValue(
+                            cacheEntry.getPlaidResponse(),
+                            PlaidEnrichResponse.PlaidEnrichedTransaction.class
+                    );
+                    enrichedTransactions.add(new EnrichmentResponse.EnrichedTransaction(
+                            enriched.id(),
+                            cacheEntry.getMerchantId(),
+                            enriched.category(),
+                            enriched.merchantName(),
+                            enriched.logoUrl(),
+                            createMetadata(enriched)
+                    ));
+                } catch (JsonProcessingException e) {
+                    log.error("Error deserializing cached Plaid transaction", e);
+                }
+            }
+        }
+
         return new EnrichmentResponse(requestId, enrichedTransactions, OffsetDateTime.now(), "SUCCESS");
     }
 
     /**
-     * Creates a PENDING stub record in the DB (committed in its own transaction so it survives
-     * any rollback of the outer transaction) and returns the corresponding cache entry.
-     * On concurrent insert collision the winning DB record is re-queried and returned.
-     */
-    private MerchantCacheEntry createStub(String description, String merchantName) {
-        return requiresNewTx.execute(txStatus -> {
-            String merchantId = guidGenerator.generate();
-            MerchantCacheEntity stub = MerchantCacheEntity.builder()
-                    .merchantId(merchantId)
-                    .description(description)
-                    .merchantName(merchantName)
-                    .status("PENDING")
-                    .createdAt(OffsetDateTime.now())
-                    .build();
-            try {
-                merchantCacheRepository.save(stub);
-                return new MerchantCacheEntry(merchantId, description, merchantName, null, "PENDING");
-            } catch (DataIntegrityViolationException e) {
-                // A concurrent request won the DB-level unique constraint race
-                log.debug("Concurrent stub insert for ({}, {}); re-querying winner", description, merchantName);
-                return merchantCacheRepository.findByDescriptionAndMerchantName(description, merchantName)
-                        .map(w -> new MerchantCacheEntry(
-                                w.getMerchantId(), w.getDescription(), w.getMerchantName(),
-                                w.getPlaidResponse(), w.getStatus()))
-                        .orElseThrow(() -> new RuntimeException(
-                                "Stub disappeared after concurrent insert race for: " + description));
-            }
-        });
-    }
-
-    /**
-     * Builds an EnrichedTransaction from a cache entry.
-     * PENDING entries return a stub response with enrichmentStatus=PENDING in metadata.
-     * ENRICHED entries return the full Plaid-sourced data.
-     */
-    private EnrichmentResponse.EnrichedTransaction buildEnrichedTransaction(
-            EnrichmentRequest.Transaction tx, MerchantCacheEntry entry) {
-
-        if (entry.isPending() || entry.plaidResponse() == null) {
-            return new EnrichmentResponse.EnrichedTransaction(
-                    tx.description(),
-                    entry.merchantId(),
-                    null,
-                    tx.description(),
-                    null,
-                    Map.of("enrichmentStatus", "PENDING")
-            );
-        }
-        try {
-            PlaidEnrichResponse.PlaidEnrichedTransaction enriched =
-                    objectMapper.readValue(entry.plaidResponse(),
-                            PlaidEnrichResponse.PlaidEnrichedTransaction.class);
-            return new EnrichmentResponse.EnrichedTransaction(
-                    enriched.id(),
-                    entry.merchantId(),
-                    enriched.category(),
-                    enriched.merchantName(),
-                    enriched.logoUrl(),
-                    createMetadata(enriched)
-            );
-        } catch (JsonProcessingException e) {
-            log.error("Error deserializing cached Plaid response for merchantId={}", entry.merchantId(), e);
-            return new EnrichmentResponse.EnrichedTransaction(
-                    tx.description(), entry.merchantId(), null, tx.description(), null,
-                    Map.of("enrichmentStatus", "ERROR")
-            );
-        }
-    }
-
-    /**
-     * Reconstructs the enriched transaction list for a prior request from the memory cache,
-     * falling back to the DB when cache entries have been evicted.
-     * Transactions not found anywhere are silently omitted.
+     * Builds the enriched transaction list from the merchant cache for a given request.
+     * Transactions not found in the cache are silently omitted.
      */
     private List<EnrichmentResponse.EnrichedTransaction> buildEnrichedTransactionsFromCache(
             EnrichmentRequest request) {
-        if (request.transactions() == null) return List.of();
-        List<EnrichmentResponse.EnrichedTransaction> results = new ArrayList<>();
-        for (EnrichmentRequest.Transaction tx : request.transactions()) {
-            String mn = nvl(tx.merchantName());
-            MerchantCacheEntry entry = memoryCache.get(tx.description(), mn)
-                    .orElseGet(() ->
-                            merchantCacheRepository.findByDescriptionAndMerchantName(tx.description(), mn)
-                                    .map(e -> new MerchantCacheEntry(
-                                            e.getMerchantId(), e.getDescription(), e.getMerchantName(),
-                                            e.getPlaidResponse(), e.getStatus()))
-                                    .orElse(null));
-            if (entry != null) {
-                results.add(buildEnrichedTransaction(tx, entry));
-            }
+        if (request.transactions() == null) {
+            return List.of();
         }
-        return results;
+        List<EnrichmentResponse.EnrichedTransaction> enrichedTransactions = new ArrayList<>();
+        for (EnrichmentRequest.Transaction tx : request.transactions()) {
+            merchantCacheRepository
+                    .findByDescriptionAndMerchantName(tx.description(), nvl(tx.merchantName()))
+                    .ifPresent(cacheEntry -> {
+                        try {
+                            PlaidEnrichResponse.PlaidEnrichedTransaction enriched = objectMapper.readValue(
+                                    cacheEntry.getPlaidResponse(),
+                                    PlaidEnrichResponse.PlaidEnrichedTransaction.class
+                            );
+                            enrichedTransactions.add(new EnrichmentResponse.EnrichedTransaction(
+                                    enriched.id(),
+                                    cacheEntry.getMerchantId(),
+                                    enriched.category(),
+                                    enriched.merchantName(),
+                                    enriched.logoUrl(),
+                                    createMetadata(enriched)
+                            ));
+                        } catch (JsonProcessingException e) {
+                            log.error("Error deserializing cached Plaid transaction in getById", e);
+                        }
+                    });
+        }
+        return enrichedTransactions;
     }
 
-    /** Processes a single batch item reactively, delegating to {@link #enrichCore}. */
+    /**
+     * Processes a single batch item reactively, delegating to enrichCore.
+     */
     private Mono<EnrichmentResponse> processBatchItem(BatchItem item) {
         return Mono.fromCallable(() -> enrichCore(item.requestId(), item.originalRequest()))
                 .onErrorResume(ex -> {
                     log.error("Batch item {} failed: {}", item.requestId(), ex.getMessage());
-                    persistStatus(item.requestId(), "FAILED", ex.getMessage());
+                    persistResponse(item.requestId(), item.originalRequest(), null, "FAILED", ex.getMessage());
                     return Mono.just(new EnrichmentResponse(
-                            item.requestId(), List.of(), OffsetDateTime.now(), "FAILED", ex.getMessage()
+                            item.requestId(),
+                            List.of(),
+                            OffsetDateTime.now(),
+                            "FAILED",
+                            ex.getMessage()
                     ));
                 });
     }
 
-    // ── Persistence helpers ──────────────────────────────────────────────────
+    /**
+     * Maps account ID and a list of transactions to Plaid request format.
+     */
+    private PlaidEnrichRequest mapToPlaidRequest(String accountId, List<EnrichmentRequest.Transaction> txs) {
+        List<PlaidEnrichRequest.PlaidTransaction> plaidTransactions = txs.stream()
+                .map(t -> new PlaidEnrichRequest.PlaidTransaction(
+                        t.description(),
+                        t.amount(),
+                        t.date(),
+                        t.merchantName()
+                ))
+                .collect(Collectors.toList());
 
+        return new PlaidEnrichRequest(
+                null, // Will be set in PlaidApiClient
+                null, // Will be set in PlaidApiClient
+                accountId,
+                plaidTransactions
+        );
+    }
+
+    /**
+     * Creates metadata map from Plaid enriched transaction.
+     */
+    private Map<String, Object> createMetadata(PlaidEnrichResponse.PlaidEnrichedTransaction transaction) {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("categoryId", transaction.categoryId());
+        metadata.put("website", transaction.website());
+        metadata.put("confidenceLevel", transaction.confidenceLevel());
+
+        if (transaction.enrichmentMetadata() != null) {
+            metadata.putAll(transaction.enrichmentMetadata());
+        }
+
+        return metadata;
+    }
+
+    /**
+     * Persists the initial request.
+     */
     private void persistRequest(String requestId, EnrichmentRequest request, String status) {
         try {
+            String requestJson = objectMapper.writeValueAsString(request);
             EnrichmentEntity entity = EnrichmentEntity.builder()
                     .requestId(requestId)
-                    .originalRequest(objectMapper.writeValueAsString(request))
+                    .originalRequest(requestJson)
                     .status(status)
                     .createdAt(OffsetDateTime.now())
                     .build();
+
             enrichmentRepository.save(entity);
             log.debug("Persisted request: {}", requestId);
         } catch (JsonProcessingException e) {
@@ -317,30 +364,60 @@ public class EnrichmentService {
         }
     }
 
-    private void persistStatus(String requestId, String status, String errorMessage) {
-        enrichmentRepository.findById(requestId).ifPresent(entity -> {
+    /**
+     * Persists the response after enrichment (either from Plaid or from cache).
+     */
+    private void persistResponse(String requestId,
+                                 EnrichmentRequest originalRequest,
+                                 PlaidEnrichResponse plaidResponse,
+                                 String status,
+                                 String errorMessage) {
+        try {
+            EnrichmentEntity entity = enrichmentRepository.findById(requestId)
+                    .orElseGet(() -> {
+                        String requestJson;
+                        try {
+                            requestJson = objectMapper.writeValueAsString(originalRequest);
+                        } catch (JsonProcessingException e) {
+                            requestJson = "{}";
+                        }
+                        return EnrichmentEntity.builder()
+                                .requestId(requestId)
+                                .originalRequest(requestJson)
+                                .createdAt(OffsetDateTime.now())
+                                .build();
+                    });
+
             entity.setStatus(status);
             entity.setErrorMessage(errorMessage);
+
+            if (plaidResponse != null) {
+                String responseJson = objectMapper.writeValueAsString(plaidResponse);
+                entity.setPlaidResponse(responseJson);
+            }
+
             enrichmentRepository.save(entity);
-            log.debug("Updated enrichment record: {} status={}", requestId, status);
-        });
-    }
-
-    // ── Metadata / utility ───────────────────────────────────────────────────
-
-    private Map<String, Object> createMetadata(PlaidEnrichResponse.PlaidEnrichedTransaction tx) {
-        Map<String, Object> metadata = new HashMap<>();
-        metadata.put("categoryId", tx.categoryId());
-        metadata.put("website", tx.website());
-        metadata.put("confidenceLevel", tx.confidenceLevel());
-        if (tx.enrichmentMetadata() != null) {
-            metadata.putAll(tx.enrichmentMetadata());
+            log.debug("Updated enrichment record: {} with status: {}", requestId, status);
+        } catch (JsonProcessingException e) {
+            log.error("Error serializing response", e);
         }
-        return metadata;
     }
 
     /** Coerces null to empty string for cache key consistency. */
-    private String nvl(String s) { return s != null ? s : ""; }
+    private String nvl(String s) {
+        return s != null ? s : "";
+    }
 
-    private record BatchItem(String requestId, EnrichmentRequest originalRequest) {}
+    /** Composite cache key from description and (null-safe) merchant name. */
+    private String cacheKey(String desc, String merchant) {
+        return desc + "|" + nvl(merchant);
+    }
+
+    /**
+     * Helper record for batch processing.
+     */
+    private record BatchItem(
+            String requestId,
+            EnrichmentRequest originalRequest
+    ) {}
 }

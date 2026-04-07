@@ -47,16 +47,9 @@ public class MerchantCacheEntity {
 
     /**
      * JSON of PlaidEnrichedTransaction stored from the Plaid API response.
-     * Null while status is PENDING.
      */
     @Column(name = "plaid_response", columnDefinition = "NVARCHAR(MAX)")
     private String plaidResponse;
-
-    /**
-     * Enrichment status: PENDING (stub created, Plaid call queued) or ENRICHED (Plaid data received).
-     */
-    @Column(name = "status", nullable = false, length = 20)
-    private String status = "PENDING";
 
     /**
      * Timestamp when this cache entry was created.

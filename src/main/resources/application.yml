@@ -24,13 +24,6 @@ spring:
     deserialization:
       fail-on-unknown-properties: false
 
-# In-memory merchant cache and async enrichment queue
-enrich:
-  cache:
-    max-size: 1000000      # maximum merchant entries held in memory
-    queue-capacity: 10000  # background enrichment queue depth
-    worker-threads: 4      # virtual-thread workers draining the queue
-
 # Plaid API Configuration
 plaid:
   api:

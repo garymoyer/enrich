@@ -39,11 +39,7 @@
 
         <!-- Test coverage thresholds -->
         <jacoco.coverage.minimum>0.90</jacoco.coverage.minimum>
-        <!-- PIT threshold: lowered to 75 because log-statement void calls (VoidMethodCallMutator)
-             and timing-code arithmetic (MathMutator) in the new MerchantMemoryCache /
-             EnrichmentQueueProcessor classes are inherently unkillable without a log-capture
-             framework. Functional logic is fully covered; JaCoCo branch coverage is 92%. -->
-        <pitest.mutation.threshold>75</pitest.mutation.threshold>
+        <pitest.mutation.threshold>80</pitest.mutation.threshold>
     </properties>
 
     <dependencies>
