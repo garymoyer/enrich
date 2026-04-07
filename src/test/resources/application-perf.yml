@@ -70,6 +70,6 @@ management:
 logging:
   level:
     root: WARN
-    com.plaid.enrich: WARN
+    com.td.enrich: WARN
     org.hibernate: WARN
     io.github.resilience4j: WARN

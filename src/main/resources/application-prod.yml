@@ -44,7 +44,7 @@ azure:
 logging:
   level:
     root: INFO
-    com.plaid.enrich: INFO
+    com.td.enrich: INFO
     org.springframework.web: WARN
     org.hibernate.SQL: WARN
     io.github.resilience4j: INFO

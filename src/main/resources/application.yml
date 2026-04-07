@@ -131,7 +131,7 @@ server:
 logging:
   level:
     root: INFO
-    com.plaid.enrich: INFO
+    com.td.enrich: INFO
     org.springframework.web: INFO
     org.hibernate.SQL: DEBUG
     io.github.resilience4j: DEBUG

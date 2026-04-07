@@ -51,7 +51,7 @@ resilience4j:
 logging:
   level:
     root: WARN
-    com.plaid.enrich: DEBUG
+    com.td.enrich: DEBUG
     org.testcontainers: INFO
 
 # Disable actuator in tests

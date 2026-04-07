@@ -40,7 +40,7 @@
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
         </root>
-        <logger name="com.plaid.enrich" level="DEBUG"/>
+        <logger name="com.td.enrich" level="DEBUG"/>
         <logger name="org.springframework.web" level="DEBUG"/>
         <logger name="io.github.resilience4j" level="TRACE"/>
     </springProfile>
@@ -50,7 +50,7 @@
         <root level="WARN">
             <appender-ref ref="CONSOLE"/>
         </root>
-        <logger name="com.plaid.enrich" level="DEBUG"/>
+        <logger name="com.td.enrich" level="DEBUG"/>
         <logger name="org.testcontainers" level="INFO"/>
     </springProfile>
 
@@ -59,7 +59,7 @@
         <root level="INFO">
             <appender-ref ref="ASYNC_JSON"/>
         </root>
-        <logger name="com.plaid.enrich" level="INFO"/>
+        <logger name="com.td.enrich" level="INFO"/>
         <logger name="org.springframework.web" level="WARN"/>
         <logger name="org.hibernate" level="WARN"/>
         <logger name="io.github.resilience4j" level="INFO"/>
@@ -70,6 +70,6 @@
         <root level="INFO">
             <appender-ref ref="CONSOLE"/>
         </root>
-        <logger name="com.plaid.enrich" level="INFO"/>
+        <logger name="com.td.enrich" level="INFO"/>
     </springProfile>
 </configuration>

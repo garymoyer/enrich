@@ -32,7 +32,7 @@ plaid:
 logging:
   level:
     root: INFO
-    com.plaid.enrich: DEBUG
+    com.td.enrich: DEBUG
     org.springframework.web: DEBUG
     org.hibernate: DEBUG
     io.github.resilience4j: TRACE
