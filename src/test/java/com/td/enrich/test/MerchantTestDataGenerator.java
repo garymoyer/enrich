@@ -578,10 +578,14 @@ public class MerchantTestDataGenerator {
         /** Highest typical transaction amount for this merchant (in USD). */
         final double maxAmount;
 
-        MerchantInfo(String officialName, double minAmount, double maxAmount) {
+        /** The category or type of merchant (e.g., "Grocery", "Fast Food"). */
+        final String category;
+
+        MerchantInfo(String officialName, double minAmount, double maxAmount, String category) {
             this.officialName = officialName;
             this.minAmount = minAmount;
             this.maxAmount = maxAmount;
+            this.category = category;
         }
     }
 }
