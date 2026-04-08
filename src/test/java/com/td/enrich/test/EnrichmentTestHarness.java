@@ -175,7 +175,6 @@ public class EnrichmentTestHarness {
         System.out.println("\n=== Running Cache-Heavy Test Scenario ===\n");
 
         List<EnrichmentRequest> testCases = MerchantTestDataGenerator.generateScenario("CACHE_HEAVY");
-        long cacheHitTime = 0;
         int cacheHits = 0;
 
         for (int i = 0; i < testCases.size(); i++) {
@@ -237,7 +236,7 @@ public class EnrichmentTestHarness {
 
             try {
                 long startTime = System.nanoTime();
-                EnrichmentResponse response = client.enrichSingle(request);
+                client.enrichSingle(request);
                 long elapsed = System.nanoTime() - startTime;
 
                 result.success = true;

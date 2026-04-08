@@ -578,14 +578,10 @@ public class MerchantTestDataGenerator {
         /** Highest typical transaction amount for this merchant (in USD). */
         final double maxAmount;
 
-        /** Human-readable category label used for catalog organization. */
-        final String category;
-
-        MerchantInfo(String officialName, double minAmount, double maxAmount, String category) {
+        MerchantInfo(String officialName, double minAmount, double maxAmount) {
             this.officialName = officialName;
             this.minAmount = minAmount;
             this.maxAmount = maxAmount;
-            this.category = category;
         }
     }
 }
