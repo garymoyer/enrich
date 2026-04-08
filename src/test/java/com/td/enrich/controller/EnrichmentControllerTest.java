@@ -9,7 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -63,10 +63,12 @@ class EnrichmentControllerTest {
     private ObjectMapper objectMapper;
 
     /**
-     * MockBean replaces the real EnrichmentService bean in the Spring context.
-     * Each test stubs the method(s) it needs via {@code when(...).thenReturn(...)}.
+     * {@code @MockitoBean} replaces the real {@link EnrichmentService} bean in the
+     * Spring context with a Mockito mock. Each test stubs only the method(s) it needs
+     * via {@code when(...).thenReturn(...)}. Prefer {@code @MockitoBean} over the
+     * deprecated {@code @MockBean} from Spring Boot 3.4+.
      */
-    @MockBean
+    @MockitoBean
     private EnrichmentService enrichmentService;
 
     // ── POST /api/v1/enrich ────────────────────────────────────────────────────

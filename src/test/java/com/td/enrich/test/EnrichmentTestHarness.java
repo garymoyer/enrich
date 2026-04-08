@@ -176,6 +176,7 @@ public class EnrichmentTestHarness {
 
         List<EnrichmentRequest> testCases = MerchantTestDataGenerator.generateScenario("CACHE_HEAVY");
         int cacheHits = 0;
+        long cacheHitTime = 0; // accumulates total response time for sub-10ms (cache-hit) responses
 
         for (int i = 0; i < testCases.size(); i++) {
             EnrichmentRequest request = testCases.get(i);
@@ -188,8 +189,11 @@ public class EnrichmentTestHarness {
 
                 result.success = true;
                 result.responseTimeMs = elapsed / 1_000_000;
+                result.plaidResponseAvailable = response.enrichedTransactions() != null
+                        && !response.enrichedTransactions().isEmpty();
 
-                // Sub-10ms responses are counted as cache hits
+                // Sub-10ms responses are counted as cache hits; accumulate their time
+                // so we can report the average cache-hit latency at the end of the loop
                 if (result.responseTimeMs < 10) {
                     cacheHits++;
                     cacheHitTime += result.responseTimeMs;
@@ -207,6 +211,12 @@ public class EnrichmentTestHarness {
             if ((i + 1) % 20 == 0) {
                 System.out.printf("Processed %d/%d cache-heavy tests\n", i + 1, testCases.size());
             }
+        }
+
+        // Print average cache-hit latency — useful for verifying the in-memory cache is working
+        if (cacheHits > 0) {
+            System.out.printf("Cache hits: %d  |  avg cache-hit latency: %.1f ms%n",
+                    cacheHits, (double) cacheHitTime / cacheHits);
         }
 
         TestRunReport report = generateReport("Cache-Heavy Scenario");

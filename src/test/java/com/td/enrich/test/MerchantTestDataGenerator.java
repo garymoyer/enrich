@@ -578,7 +578,12 @@ public class MerchantTestDataGenerator {
         /** Highest typical transaction amount for this merchant (in USD). */
         final double maxAmount;
 
-        /** The category or type of merchant (e.g., "Grocery", "Fast Food"). */
+        /**
+         * Human-readable category label (e.g. "Coffee Shop", "Airline").
+         * Stored for readability in the map definition; not currently used in
+         * request generation, but retained so the merchant catalog remains
+         * self-documenting.
+         */
         final String category;
 
         MerchantInfo(String officialName, double minAmount, double maxAmount, String category) {

@@ -1,8 +1,6 @@
 package com.td.enrich.service;
 
-import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
-import com.td.enrich.config.WebClientConfig;
 import com.td.enrich.domain.PlaidEnrichRequest;
 import com.td.enrich.exception.PlaidApiException;
 import io.github.resilience4j.bulkhead.Bulkhead;
