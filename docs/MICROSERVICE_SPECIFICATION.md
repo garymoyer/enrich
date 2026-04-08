@@ -53,7 +53,7 @@ The **TD Enrich Service** is a Spring Boot microservice that enriches financial 
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Java | 21 (LTS) | Project Loom virtual threads enabled |
+| Java | 17 (LTS) | |
 | Spring Boot | 3.4.2 | Spring Data JPA, WebFlux, Actuator |
 | Resilience4j | 2.2.0 | Circuit breaker, retry, bulkhead, timeout |
 | OpenTelemetry | 1.40.0 | Tracing and metrics export |
@@ -212,7 +212,7 @@ paths:
       description: |
         Accepts a batch of transactions for asynchronous enrichment.
         Returns immediately with GUIDs for polling results.
-        Batch processing is handled by a queue processor with virtual threads.
+        Batch processing is handled by a queue processor with a dedicated thread pool.
       operationId: enrichBatch
       tags:
         - Enrichment
@@ -1820,11 +1820,11 @@ trivy image --severity HIGH,CRITICAL gcr.io/company/enrich-service:latest
 |----------|----------|---------|-----------|-------|
 | Dev/Staging | 1-2 | 500m | 512Mi | Single pod acceptable |
 | Production (5K req/min) | 3 | 2 | 1Gi | Baseline production |
-| Production (50K req/min) | 10 | 4 | 2Gi | Peak load; virtual threads |
+| Production (50K req/min) | 10 | 4 | 2Gi | Peak load |
 | Production (100K+ req/min) | 20+ | 8 | 4Gi | Multiple zones; auto-scaling |
 
 **Concurrency Model:**
-- **Request threads:** Project Loom virtual threads (99,999 concurrent requests)
+- **Request threads:** Tomcat thread pool (default 200 threads, configurable via `server.tomcat.threads.max`)
 - **Database pool:** HikariCP, 20 connections per pod
 - **HTTP client threads:** 10 (configured via Resilience4j Bulkhead)
 
@@ -2104,7 +2104,7 @@ jobs:
       - name: Set up JDK 21
         uses: actions/setup-java@v3
         with:
-          java-version: '21'
+          java-version: '17'
           distribution: 'temurin'
           cache: maven
       

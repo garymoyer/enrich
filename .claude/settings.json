@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(javap -p '~/.m2/repository/io/github/resilience4j/resilience4j-bulkhead/2.2.0/resilience4j-bulkhead-2.2.0.jar!io/github/resilience4j/bulkhead/Bulkhead$Metrics.class')",
+      "Read(//private/tmp/**)",
+      "Bash(jar xf:*)",
+      "Bash(javap 'io/github/resilience4j/bulkhead/Bulkhead$Metrics.class')",
+      "Bash(./mvnw test:*)",
+      "Bash(./mvnw clean:*)"
+    ]
+  }
+}

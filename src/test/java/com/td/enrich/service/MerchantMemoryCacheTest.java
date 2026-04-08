@@ -21,6 +21,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.*;
 
+/**
+ * Unit tests for {@link MerchantMemoryCache}.
+ *
+ * <p><b>What these tests cover:</b>
+ * <ul>
+ *   <li>Basic get / put / update operations.</li>
+ *   <li>Case-insensitive lookup (keys are lowercased).</li>
+ *   <li>Atomic {@code getOrCreate} — supplier called exactly once per key even under
+ *       concurrent access from 20 threads.</li>
+ *   <li>Max-size enforcement — cache stops accepting new entries when full, but the
+ *       supplier is still called so the result can be persisted to the DB.</li>
+ *   <li>Startup population from the DB via {@link MerchantMemoryCache#initialize()}.</li>
+ *   <li>Null-safety in {@link MerchantMemoryCache#buildKey}.</li>
+ * </ul>
+ *
+ * <p>{@link MerchantCacheRepository} is mocked so tests don't need a database. The
+ * {@link MerchantMemoryCache} itself is the real class under test.
+ */
 @ExtendWith(MockitoExtension.class)
 @DisplayName("MerchantMemoryCache Unit Tests")
 class MerchantMemoryCacheTest {
@@ -28,16 +46,20 @@ class MerchantMemoryCacheTest {
     @Mock
     private MerchantCacheRepository repository;
 
+    /** The cache instance under test; recreated before each test with maxSize=100. */
     private MerchantMemoryCache cache;
 
     @BeforeEach
     void setUp() {
         EnrichCacheProperties props = new EnrichCacheProperties();
         props.setMaxSize(100);
+        // Stub findAll() to return an empty list so initialize() starts with a clean slate
         when(repository.findAll()).thenReturn(List.of());
         cache = new MerchantMemoryCache(props, repository);
         cache.initialize();
     }
+
+    // ── get ────────────────────────────────────────────────────────────────────
 
     @Test
     @DisplayName("get returns empty on cold cache")
@@ -63,11 +85,14 @@ class MerchantMemoryCacheTest {
     @Test
     @DisplayName("get is case-insensitive via normalised key")
     void getIsCaseInsensitive() {
+        // Insert with lowercase; look up with UPPER and Mixed — all should find the entry
         cache.put(new MerchantCacheEntry("mid-1", "starbucks coffee", "starbucks", null, "PENDING"));
 
         assertThat(cache.get("STARBUCKS COFFEE", "STARBUCKS")).isPresent();
         assertThat(cache.get("Starbucks Coffee", "Starbucks")).isPresent();
     }
+
+    // ── getOrCreate ────────────────────────────────────────────────────────────
 
     @Test
     @DisplayName("getOrCreate calls supplier exactly once on miss and inserts entry")
@@ -77,14 +102,15 @@ class MerchantMemoryCacheTest {
 
         MerchantMemoryCache.GetOrCreateResult first =
                 cache.getOrCreate("AMAZON", "Amazon", () -> { callCount.incrementAndGet(); return stub; });
+        // Second call for the same key — supplier must NOT be invoked again
         MerchantMemoryCache.GetOrCreateResult second =
                 cache.getOrCreate("AMAZON", "Amazon", () -> { callCount.incrementAndGet(); return stub; });
 
         assertThat(first.created()).isTrue();
         assertThat(first.entry().merchantId()).isEqualTo("mid-new");
-        assertThat(second.created()).isFalse();
+        assertThat(second.created()).isFalse();   // entry already existed
         assertThat(second.entry().merchantId()).isEqualTo("mid-new");
-        assertThat(callCount.get()).isEqualTo(1);
+        assertThat(callCount.get()).isEqualTo(1); // supplier called exactly once
         assertThat(cache.size()).isEqualTo(1);
     }
 
@@ -98,10 +124,66 @@ class MerchantMemoryCacheTest {
         MerchantMemoryCache.GetOrCreateResult result =
                 cache.getOrCreate("COSTCO", "Costco", () -> { callCount.incrementAndGet(); return existing; });
 
-        assertThat(result.created()).isFalse();
+        assertThat(result.created()).isFalse();           // found in fast-path cache.get()
         assertThat(result.entry().merchantId()).isEqualTo("mid-ex");
-        assertThat(callCount.get()).isZero();
+        assertThat(callCount.get()).isZero();              // supplier never called on a hit
     }
+
+    @Test
+    @DisplayName("getOrCreate with full cache invokes supplier but does not cache result")
+    void getOrCreateWhenFullDoesNotCache() {
+        // Create a cache that holds exactly 1 entry
+        EnrichCacheProperties props = new EnrichCacheProperties();
+        props.setMaxSize(1);
+        when(repository.findAll()).thenReturn(List.of());
+        MerchantMemoryCache tinyCache = new MerchantMemoryCache(props, repository);
+        tinyCache.initialize();
+
+        // Fill the only slot
+        tinyCache.getOrCreate("SLOT_A", "", () ->
+                new MerchantCacheEntry("mid-a", "SLOT_A", "", null, "PENDING"));
+        assertThat(tinyCache.size()).isEqualTo(1);
+
+        // Second entry must be created (supplier called) but NOT inserted into the map
+        MerchantMemoryCache.GetOrCreateResult result = tinyCache.getOrCreate("SLOT_B", "", () ->
+                new MerchantCacheEntry("mid-b", "SLOT_B", "", null, "PENDING"));
+        assertThat(result.created()).isTrue();              // supplier was called
+        assertThat(result.entry().merchantId()).isEqualTo("mid-b");
+        assertThat(tinyCache.size()).isEqualTo(1);          // still 1 — SLOT_B was NOT inserted
+    }
+
+    @Test
+    @DisplayName("getOrCreate supplier is called exactly once under concurrent access for the same key")
+    void getOrCreateIsAtomicUnderConcurrency() throws InterruptedException {
+        // 20 threads all try getOrCreate for "CONCURRENT" at the same time
+        int threads = 20;
+        AtomicInteger supplierCallCount = new AtomicInteger();
+        // CountDownLatch lets all threads start as close to simultaneously as possible
+        CountDownLatch ready = new CountDownLatch(threads); // each thread signals "I'm ready"
+        CountDownLatch go = new CountDownLatch(1);          // main thread signals "go"
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+
+        for (int i = 0; i < threads; i++) {
+            pool.submit(() -> {
+                ready.countDown();   // signal: this thread is about to call getOrCreate
+                try { go.await(); } catch (InterruptedException ignored) {}
+                cache.getOrCreate("CONCURRENT", "Test", () -> {
+                    supplierCallCount.incrementAndGet();
+                    return new MerchantCacheEntry("mid-c", "CONCURRENT", "Test", null, "PENDING");
+                });
+            });
+        }
+        ready.await();  // wait until all threads are lined up
+        go.countDown(); // fire the starting gun — all 20 threads race into getOrCreate
+        pool.shutdown();
+        pool.awaitTermination(5, TimeUnit.SECONDS);
+
+        // ConcurrentHashMap.computeIfAbsent guarantees the supplier runs exactly once
+        assertThat(supplierCallCount.get()).isEqualTo(1);
+        assertThat(cache.size()).isEqualTo(1);
+    }
+
+    // ── update ─────────────────────────────────────────────────────────────────
 
     @Test
     @DisplayName("update replaces plaidResponse and sets status to ENRICHED")
@@ -118,31 +200,42 @@ class MerchantMemoryCacheTest {
     }
 
     @Test
+    @DisplayName("update is a no-op when key is absent")
+    void updateIsNoopForAbsentKey() {
+        // Should not throw; cache remains empty
+        cache.update("NONEXISTENT", "", "{\"data\":1}");
+        assertThat(cache.size()).isZero();
+    }
+
+    // ── put ────────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("put skips insertion when cache is already at maxSize")
+    void putSkipsInsertWhenFull() {
+        EnrichCacheProperties props = new EnrichCacheProperties();
+        props.setMaxSize(1);
+        when(repository.findAll()).thenReturn(List.of());
+        MerchantMemoryCache tinyCache = new MerchantMemoryCache(props, repository);
+        tinyCache.initialize();
+
+        tinyCache.put(new MerchantCacheEntry("mid-1", "FIRST", "First", null, "PENDING"));
+        assertThat(tinyCache.size()).isEqualTo(1);
+
+        // Second put is silently ignored — size stays at 1
+        tinyCache.put(new MerchantCacheEntry("mid-2", "SECOND", "Second", null, "PENDING"));
+        assertThat(tinyCache.size()).isEqualTo(1);
+    }
+
+    // ── isPending ──────────────────────────────────────────────────────────────
+
+    @Test
     @DisplayName("isPending returns true for a PENDING entry")
     void isPendingReturnsTrueForPendingEntry() {
         MerchantCacheEntry entry = new MerchantCacheEntry("mid-p", "DESC", "Name", null, "PENDING");
         assertThat(entry.isPending()).isTrue();
     }
 
-    @Test
-    @DisplayName("update is a no-op when key is absent")
-    void updateIsNoopForAbsentKey() {
-        // Should not throw
-        cache.update("NONEXISTENT", "", "{\"data\":1}");
-        assertThat(cache.size()).isZero();
-    }
-
-    // ── helpers ──────────────────────────────────────────────────────────────
-
-    private MerchantCacheEntity buildEntity(String merchantId, String description, String merchantName) {
-        MerchantCacheEntity e = new MerchantCacheEntity();
-        e.setMerchantId(merchantId);
-        e.setDescription(description);
-        e.setMerchantName(merchantName);
-        e.setStatus("ENRICHED");
-        e.setCreatedAt(OffsetDateTime.now());
-        return e;
-    }
+    // ── initialize ─────────────────────────────────────────────────────────────
 
     @Test
     @DisplayName("initialize loads all DB records into cache at startup")
@@ -155,6 +248,7 @@ class MerchantMemoryCacheTest {
         entity.setStatus("ENRICHED");
         entity.setCreatedAt(OffsetDateTime.now());
 
+        // Create a fresh cache that will see this record on initialize()
         when(repository.findAll()).thenReturn(List.of(entity));
         EnrichCacheProperties props = new EnrichCacheProperties();
         props.setMaxSize(100);
@@ -169,35 +263,6 @@ class MerchantMemoryCacheTest {
     }
 
     @Test
-    @DisplayName("getOrCreate with full cache invokes supplier but does not cache result")
-    void getOrCreateWhenFullDoesNotCache() {
-        EnrichCacheProperties props = new EnrichCacheProperties();
-        props.setMaxSize(1);
-        when(repository.findAll()).thenReturn(List.of());
-        MerchantMemoryCache tinyCache = new MerchantMemoryCache(props, repository);
-        tinyCache.initialize();
-
-        // Fill the single slot
-        tinyCache.getOrCreate("SLOT_A", "", () ->
-                new MerchantCacheEntry("mid-a", "SLOT_A", "", null, "PENDING"));
-        assertThat(tinyCache.size()).isEqualTo(1);
-
-        // Second entry should not be cached
-        MerchantMemoryCache.GetOrCreateResult result = tinyCache.getOrCreate("SLOT_B", "", () ->
-                new MerchantCacheEntry("mid-b", "SLOT_B", "", null, "PENDING"));
-        assertThat(result.created()).isTrue();
-        assertThat(result.entry().merchantId()).isEqualTo("mid-b");
-        assertThat(tinyCache.size()).isEqualTo(1); // still 1 — SLOT_B was not inserted
-    }
-
-    @Test
-    @DisplayName("buildKey handles null description and null merchantName")
-    void buildKeyHandlesNulls() {
-        assertThat(MerchantMemoryCache.buildKey(null, "Starbucks")).isEqualTo("|starbucks");
-        assertThat(MerchantMemoryCache.buildKey("STARBUCKS", null)).isEqualTo("starbucks|");
-    }
-
-    @Test
     @DisplayName("initialize stops loading when DB record count exceeds maxSize")
     void initializeTruncatesAtMaxSize() {
         MerchantCacheEntity e1 = buildEntity("mid-1", "DESC_A", "Name A");
@@ -209,50 +274,33 @@ class MerchantMemoryCacheTest {
         MerchantMemoryCache tinyCache = new MerchantMemoryCache(props, repository);
         tinyCache.initialize();
 
-        assertThat(tinyCache.size()).isEqualTo(1); // second record skipped
-    }
-
-    @Test
-    @DisplayName("put skips insertion when cache is already at maxSize")
-    void putSkipsInsertWhenFull() {
-        EnrichCacheProperties props = new EnrichCacheProperties();
-        props.setMaxSize(1);
-        when(repository.findAll()).thenReturn(List.of());
-        MerchantMemoryCache tinyCache = new MerchantMemoryCache(props, repository);
-        tinyCache.initialize();
-
-        tinyCache.put(new MerchantCacheEntry("mid-1", "FIRST", "First", null, "PENDING"));
+        // Only the first record fits; the second is skipped with a warning
         assertThat(tinyCache.size()).isEqualTo(1);
-
-        tinyCache.put(new MerchantCacheEntry("mid-2", "SECOND", "Second", null, "PENDING"));
-        assertThat(tinyCache.size()).isEqualTo(1); // second put was ignored
     }
 
+    // ── buildKey ───────────────────────────────────────────────────────────────
+
     @Test
-    @DisplayName("getOrCreate supplier is called exactly once under concurrent access for the same key")
-    void getOrCreateIsAtomicUnderConcurrency() throws InterruptedException {
-        int threads = 20;
-        AtomicInteger supplierCallCount = new AtomicInteger();
-        CountDownLatch ready = new CountDownLatch(threads);
-        CountDownLatch go = new CountDownLatch(1);
-        ExecutorService pool = Executors.newFixedThreadPool(threads);
+    @DisplayName("buildKey handles null description and null merchantName")
+    void buildKeyHandlesNulls() {
+        // null values are treated as empty strings so the key is always well-formed
+        assertThat(MerchantMemoryCache.buildKey(null, "Starbucks")).isEqualTo("|starbucks");
+        assertThat(MerchantMemoryCache.buildKey("STARBUCKS", null)).isEqualTo("starbucks|");
+    }
 
-        for (int i = 0; i < threads; i++) {
-            pool.submit(() -> {
-                ready.countDown();
-                try { go.await(); } catch (InterruptedException ignored) {}
-                cache.getOrCreate("CONCURRENT", "Test", () -> {
-                    supplierCallCount.incrementAndGet();
-                    return new MerchantCacheEntry("mid-c", "CONCURRENT", "Test", null, "PENDING");
-                });
-            });
-        }
-        ready.await();
-        go.countDown();
-        pool.shutdown();
-        pool.awaitTermination(5, TimeUnit.SECONDS);
+    // ── Test data helper ───────────────────────────────────────────────────────
 
-        assertThat(supplierCallCount.get()).isEqualTo(1);
-        assertThat(cache.size()).isEqualTo(1);
+    /**
+     * Creates a minimal {@link MerchantCacheEntity} with status ENRICHED for use
+     * in tests that populate the DB (passed to {@link MerchantCacheRepository#findAll()}).
+     */
+    private MerchantCacheEntity buildEntity(String merchantId, String description, String merchantName) {
+        MerchantCacheEntity e = new MerchantCacheEntity();
+        e.setMerchantId(merchantId);
+        e.setDescription(description);
+        e.setMerchantName(merchantName);
+        e.setStatus("ENRICHED");
+        e.setCreatedAt(OffsetDateTime.now());
+        return e;
     }
 }

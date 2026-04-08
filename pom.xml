@@ -19,9 +19,9 @@
     <description>Production-ready Spring Boot microservice for Plaid Enrich API integration</description>
 
     <properties>
-        <java.version>21</java.version>
-        <maven.compiler.source>21</maven.compiler.source>
-        <maven.compiler.target>21</maven.compiler.target>
+        <java.version>17</java.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <!-- Dependency versions -->
@@ -246,16 +246,13 @@
                 </configuration>
             </plugin>
 
-            <!-- Maven Compiler Plugin with Java 21 -->
+            <!-- Maven Compiler Plugin with Java 17 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <configuration>
-                    <source>21</source>
-                    <target>21</target>
-                    <compilerArgs>
-                        <arg>--enable-preview</arg>
-                    </compilerArgs>
+                    <source>17</source>
+                    <target>17</target>
                 </configuration>
             </plugin>
 
@@ -264,10 +261,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <argLine>
-                        --enable-preview
-                        ${argLine}
-                    </argLine>
+                    <argLine>${argLine}</argLine>
                     <!-- Performance tests are long-running; exclude from default mvn test -->
                     <excludedGroups>performance</excludedGroups>
                 </configuration>
@@ -278,10 +272,7 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-failsafe-plugin</artifactId>
                 <configuration>
-                    <argLine>
-                        --enable-preview
-                        ${argLine}
-                    </argLine>
+                    <argLine>${argLine}</argLine>
                 </configuration>
                 <executions>
                     <execution>
@@ -382,10 +373,6 @@
                         <!-- Performance tests run for 5+ minutes; not suitable for mutation analysis -->
                         <param>com.td.enrich.performance.*</param>
                     </excludedTestClasses>
-                    <jvmArgs>
-                        <!-- Classes compiled with enable-preview require the same flag at runtime -->
-                        <value>--enable-preview</value>
-                    </jvmArgs>
                     <mutationThreshold>${pitest.mutation.threshold}</mutationThreshold>
                     <coverageThreshold>80</coverageThreshold>
                     <outputFormats>
@@ -440,10 +427,7 @@
                         <groupId>org.apache.maven.plugins</groupId>
                         <artifactId>maven-surefire-plugin</artifactId>
                         <configuration>
-                            <argLine>
-                                --enable-preview
-                                ${argLine}
-                            </argLine>
+                            <argLine>${argLine}</argLine>
                             <!-- Run only @Tag("performance") tests -->
                             <groups>performance</groups>
                             <excludedGroups/>
