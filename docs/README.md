@@ -4,7 +4,7 @@ A production-ready Spring Boot 3.4+ microservice for Plaid Enrich API integratio
 
 ## Features
 
-- **Java 21** with Records and virtual threads
+- **Java 17** with Records
 - **Spring Boot 3.4.2** with WebFlux for reactive HTTP clients
 - **Resilience4j** for retry, circuit breaker, and bulkhead patterns
 - **Azure SQL Database** with Flyway migrations
@@ -35,7 +35,7 @@ A production-ready Spring Boot 3.4+ microservice for Plaid Enrich API integratio
 
 ## Prerequisites
 
-- Java 21 JDK
+- Java 17 JDK
 - Maven 3.9+
 - Docker (for containerization)
 - Azure SQL Database (for production) or H2 (for local dev)
@@ -67,6 +67,21 @@ The service will start on `http://localhost:8080` with:
 docker run -p 8089:8080 -v $(pwd)/src/test/resources/wiremock:/home/wiremock wiremock/wiremock:latest
 ```
 
+## Authentication
+
+All enrichment endpoints require an `X-API-Key` header matching the `ENRICH_API_KEY` environment variable.
+The health and actuator probe endpoints (`/api/v1/enrich/health`, `/actuator/health`, `/actuator/info`) are public and do not require a key — they must be reachable by load balancers and Kubernetes probes.
+
+```bash
+# Set the key before running the service
+export ENRICH_API_KEY="your-secret-key"
+```
+
+Include the header on every protected request:
+```
+X-API-Key: <your-secret-key>
+```
+
 ## API Endpoints
 
 ### Enrich Single Transaction
@@ -74,6 +89,7 @@ docker run -p 8089:8080 -v $(pwd)/src/test/resources/wiremock:/home/wiremock wir
 ```bash
 POST /api/v1/enrich
 Content-Type: application/json
+X-API-Key: <your-key>
 
 {
   "accountId": "acc_123",
@@ -145,11 +161,13 @@ export SPRING_PROFILES_ACTIVE=dev
 #### Production
 ```bash
 export SPRING_PROFILES_ACTIVE=prod
+export ENRICH_API_KEY="your-secret-api-key"        # required — service won't start without this
 export AZURE_SQL_CONNECTION_STRING="jdbc:sqlserver://..."
 export PLAID_API_BASE_URL="https://production.plaid.com"
 export PLAID_API_KEY="your-api-key"
 export PLAID_CLIENT_ID="your-client-id"
 export APPLICATIONINSIGHTS_CONNECTION_STRING="InstrumentationKey=..."
+export ENABLE_SWAGGER=false                         # keep Swagger disabled in production
 ```
 
 ### Spring Profiles
@@ -195,7 +213,7 @@ mvn pitest:mutationCoverage
 open target/pit-reports/index.html
 ```
 
-Target: **80%+ mutation coverage**
+Target: **75%+ mutation coverage**
 
 ### Performance Testing
 
@@ -287,6 +305,7 @@ docker build -t plaid-enrich-service:latest .
 ```bash
 docker run -p 8080:8080 \
   -e SPRING_PROFILES_ACTIVE=prod \
+  -e ENRICH_API_KEY="your-secret-key" \
   -e AZURE_SQL_CONNECTION_STRING="jdbc:sqlserver://..." \
   -e PLAID_API_KEY="your-key" \
   plaid-enrich-service:latest
@@ -327,7 +346,7 @@ az webapp create \
   --name plaid-enrich-service \
   --resource-group rg-plaid-enrich \
   --plan asp-plaid-enrich \
-  --runtime "JAVA:21-java21"
+  --runtime "JAVA:17-java17"
 
 # Configure environment variables
 az webapp config appsettings set \
@@ -361,11 +380,12 @@ Azure App Service monitors `/actuator/health`:
 
 ### Actuator Endpoints
 
-- `/actuator/health` - Health status
-- `/actuator/metrics` - Metrics
-- `/actuator/prometheus` - Prometheus metrics
-- `/actuator/circuitbreakers` - Circuit breaker state
-- `/actuator/circuitbreakerevents` - Circuit breaker events
+- `/actuator/health` - Health status (all environments)
+- `/actuator/info` - Build info (all environments)
+- `/actuator/metrics` - Metrics (all environments)
+- `/actuator/prometheus` - Prometheus metrics (all environments)
+- `/actuator/circuitbreakers` - Circuit breaker state (dev profile only)
+- `/actuator/circuitbreakerevents` - Circuit breaker events (dev profile only)
 
 ### Application Insights
 

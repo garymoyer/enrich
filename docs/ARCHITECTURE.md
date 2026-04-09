@@ -12,9 +12,9 @@ The TD Enrich Service is a production-ready Spring Boot microservice that enrich
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │              EnrichmentController (REST Endpoints)              │
-│  • POST /api/v1/enrich/single - Single transaction enrichment  │
-│  • POST /api/v1/enrich/batch  - Batch enrichment (async)       │
-│  • GET  /api/v1/enrich/{guid} - Get enriched result by GUID    │
+│  • POST /api/v1/enrich        - Single transaction enrichment  │
+│  • POST /api/v1/enrich/batch  - Batch enrichment (parallel)    │
+│  • GET  /api/v1/enrich/{id}   - Retrieve enriched result       │
 └──────────────────┬──────────────────────────────────────────────┘
                    │
     ┌──────────────┴──────────────────┐
@@ -34,7 +34,7 @@ The TD Enrich Service is a production-ready Spring Boot microservice that enrich
 │ PlaidApiClient│  │EnrichmentQueue   │  │Merchant Cache│  │Repository  │
 │ (with         │  │Processor         │  │(In-Memory +  │  │(JPA/SQL)   │
 │  Resilience)  │  │(Async Processing)│  │ Database)    │  │            │
-│ • WebClient   │  │ • Virtual Threads│  │ • LRU cache  │  │Persistence│
+│ • WebClient   │  │ • Thread pool    │  │ • LRU cache  │  │Persistence│
 │ • Retry       │  │ • Queue mgmt     │  │ • DB lookup  │  │ • H2 dev   │
 │ • Circuit     │  │ • Error handling │  │ • Thread-safe│  │ • SQL prod │
 │   breaker     │  │ • Status tracking│  │              │  │            │
@@ -55,9 +55,10 @@ The TD Enrich Service is a production-ready Spring Boot microservice that enrich
 ### 1. EnrichmentController
 **Package:** `com.td.enrich.controller`  
 **Endpoints:**
-- `POST /api/v1/enrich/single` - Synchronous single transaction enrichment
-- `POST /api/v1/enrich/batch` - Asynchronous batch processing
-- `GET /api/v1/enrich/{guid}` - Retrieve enriched result by GUID
+- `POST /api/v1/enrich` — Enrich a single batch of transactions; returns enriched result synchronously
+- `POST /api/v1/enrich/batch` — Enrich multiple transaction batches in parallel
+- `GET /api/v1/enrich/{requestId}` — Retrieve a previously stored enrichment result by UUID
+- `GET /api/v1/enrich/health` — Public liveness check (no API key required)
 
 Responsible for:
 - Request validation
@@ -105,16 +106,32 @@ Responsible for:
 ### 5. EnrichmentQueueProcessor
 **Package:** `com.td.enrich.service`  
 **Async Processing:**
-- Virtual threads (Project Loom) for lightweight async workers
+- Fixed thread pool of daemon workers (configurable via `enrich.cache.worker-threads`, default: 1)
 - Configurable worker pool (default: 1)
 - Task queue with size limit (default: 1000)
 - Graceful shutdown with pending task handling
 - Automatic status transitions (PENDING → ENRICHED)
 
-### 6. Data Persistence
+### 6. SecurityConfig / ApiKeyAuthFilter
+**Package:** `com.td.enrich.config`  
+**Authentication:**
+- Every request to a protected endpoint must include `X-API-Key: <secret>` header
+- The expected key is read from the `ENRICH_API_KEY` environment variable; the service refuses to start if it is absent
+- `ApiKeyAuthFilter` uses constant-time string comparison to prevent timing attacks
+- Public paths (`/api/v1/enrich/health`, `/actuator/health`, `/actuator/info`) are bypassed via `shouldNotFilter()`
+
+### 7. MerchantCacheRefreshScheduler
+**Package:** `com.td.enrich.service`  
+**TTL Refresh:**
+- Runs nightly at 02:00 UTC (`@Scheduled(cron = "0 0 2 * * *")`)
+- Queries `merchant_cache` for ENRICHED rows where `last_enriched_at` is older than `enrich.cache.ttl-days` (default: 30)
+- Re-submits stale entries to `EnrichmentQueueProcessor` for background re-enrichment
+- No-op when `ttl-days = 0` (useful in test environments)
+
+### 8. Data Persistence
 **Entities:**
 - `EnrichmentEntity` - Request/response audit log
-- `MerchantCacheEntity` - Cache with (description, merchantName) uniqueness
+- `MerchantCacheEntity` - Cache with (description, merchantName) uniqueness; includes `last_enriched_at` timestamp for TTL tracking
 
 **Databases:**
 - **Development/Testing:** H2 (in-memory)
@@ -124,6 +141,7 @@ Responsible for:
 - V1: Initial schema (enrichment requests/responses)
 - V2: Merchant cache table
 - V3: Cache status tracking
+- V4: `last_enriched_at` column on `merchant_cache` for TTL-based refresh
 
 ## Request Flow
 
@@ -250,7 +268,8 @@ enrich:
   cache:
     max-size: 1000                    # LRU capacity
     queue-size: 1000                  # Async task queue
-    worker-threads: 1                 # Virtual thread workers
+    worker-threads: 1                 # Background worker threads
+    ttl-days: 30                      # Days before a cache entry is re-enriched
 
 # Resilience4j Patterns
 resilience4j:
@@ -289,7 +308,7 @@ resilience4j:
 - Test profiles per environment
 
 ### Performance Tests
-- Virtual thread throughput benchmarks
+- Throughput benchmarks
 - Cache hit/miss analysis
 - Resilience pattern performance under load
 
@@ -328,7 +347,7 @@ Transforms exceptions into REST responses:
 - **Merchant Memory Cache:** Synchronized map with manual synchronization on complex operations
 - **Database:** Spring Data transactional boundaries
 - **GUID Generation:** Thread-safe UUID generation
-- **Virtual Thread Integration:** Natural concurrency via async/await patterns
+- **Background Workers:** Fixed daemon thread pool with bounded queue (`LinkedBlockingQueue`)
 
 ## Performance Characteristics
 
@@ -359,7 +378,7 @@ Add additional Resilience4j patterns (e.g., RateLimiter) without changing core l
 - Spring Boot 3.4.2
 - Spring Data JPA
 - Spring WebFlux (WebClient)
-- Spring Security (for future auth)
+- Spring Security (API key authentication via `X-API-Key` header)
 
 ### Resilience & Observability
 - Resilience4j 2.2.0

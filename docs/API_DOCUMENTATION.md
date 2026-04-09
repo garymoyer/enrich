@@ -73,7 +73,7 @@ Plaid Enrich API
 
 | Layer | Technology |
 |---|---|
-| Runtime | Java 21, Spring Boot 3.4 |
+| Runtime | Java 17, Spring Boot 3.4 |
 | HTTP | Spring MVC (sync) + Spring WebFlux (async Plaid calls) |
 | Persistence | Spring Data JPA, Flyway, Azure SQL Server |
 | Resilience | Resilience4j (circuit breaker, retry, bulkhead) |
@@ -84,16 +84,37 @@ Plaid Enrich API
 
 ## 3. Authentication
 
-The service itself does **not** enforce consumer-level authentication in the current version — it is intended to be deployed behind an API gateway or internal network boundary.
+### Inbound (caller → this service)
 
-Outbound calls to the Plaid API are authenticated with two credentials injected at startup via environment variables:
+Every protected endpoint requires an `X-API-Key` header:
+
+```
+X-API-Key: <your-secret-key>
+```
+
+The expected key is configured via the `ENRICH_API_KEY` environment variable. The service refuses to start if this variable is absent — there is no insecure default.
+
+Requests without a valid key receive **401 Unauthorized** (missing header) or **403 Forbidden** (wrong key).
+
+Public endpoints that do **not** require a key:
+
+| Path | Purpose |
+|---|---|
+| `GET /api/v1/enrich/health` | Controller liveness check for load balancers |
+| `GET /actuator/health` | Kubernetes liveness/readiness probe |
+| `GET /actuator/info` | Non-sensitive build information |
+
+### Outbound (this service → Plaid)
+
+Outbound calls to the Plaid API are authenticated with two credentials injected at startup:
 
 | Variable | Purpose |
 |---|---|
 | `PLAID_CLIENT_ID` | Plaid client identifier |
-| `PLAID_API_KEY` | Plaid secret API key |
+| `PLAID_API_KEY` | Plaid secret key |
+| `ENRICH_API_KEY` | Key required by callers of **this** service |
 
-These are never returned in any API response.
+These credentials are never returned in any API response.
 
 ---
 
@@ -218,6 +239,7 @@ Content-Type: application/json
 ```bash
 curl -X POST http://localhost:8080/api/v1/enrich \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $ENRICH_API_KEY" \
   -d '{
     "accountId": "acc_12345",
     "transactions": [{
@@ -307,6 +329,7 @@ An array of [EnrichmentRequest](#61-enrichmentrequest) objects (min 1 item).
 ```bash
 curl -X POST http://localhost:8080/api/v1/enrich/batch \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $ENRICH_API_KEY" \
   -d '[
     {"accountId":"acc_001","transactions":[{"description":"AMAZON","amount":29.99,"date":"2026-01-29"}]},
     {"accountId":"acc_002","transactions":[{"description":"UBER","amount":14.50,"date":"2026-01-30"}]}
@@ -348,7 +371,8 @@ Empty body with HTTP 404 status.
 **Example — curl**
 
 ```bash
-curl http://localhost:8080/api/v1/enrich/550e8400-e29b-41d4-a716-446655440000
+curl http://localhost:8080/api/v1/enrich/550e8400-e29b-41d4-a716-446655440000 \
+  -H "X-API-Key: $ENRICH_API_KEY"
 ```
 
 ---
@@ -580,6 +604,13 @@ Key metrics emitted:
 
 The following environment variables control runtime behaviour.
 
+### Service Authentication
+
+| Variable | Default | Description |
+|---|---|---|
+| `ENRICH_API_KEY` | *(none — required)* | Secret key callers must supply in `X-API-Key` header. Service refuses to start if absent. |
+| `ENABLE_SWAGGER` | `false` | Set to `true` to expose Swagger UI at `/swagger-ui.html`. Keep `false` in production. |
+
 ### Plaid API
 
 | Variable | Default | Description |
@@ -619,6 +650,7 @@ The following environment variables control runtime behaviour.
 ```bash
 curl -X POST http://localhost:8080/api/v1/enrich \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $ENRICH_API_KEY" \
   -d '{
     "accountId": "acc_12345",
     "transactions": [
@@ -673,7 +705,8 @@ curl -X POST http://localhost:8080/api/v1/enrich \
 
 **Retrieve by requestId**
 ```bash
-curl http://localhost:8080/api/v1/enrich/550e8400-e29b-41d4-a716-446655440000
+curl http://localhost:8080/api/v1/enrich/550e8400-e29b-41d4-a716-446655440000 \
+  -H "X-API-Key: $ENRICH_API_KEY"
 ```
 
 ---

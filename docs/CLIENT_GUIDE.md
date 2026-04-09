@@ -8,9 +8,15 @@
 Base URL: http://localhost:8080/api/v1/enrich
 ```
 
-### 2. Authentication (Future)
+### 2. Authentication
 
-Currently, the service is unsecured. Authentication will be added via OAuth 2.0 + Spring Security in a future release.
+All enrichment endpoints require an `X-API-Key` request header. Obtain the key from your platform team and include it on every request:
+
+```
+X-API-Key: <your-secret-key>
+```
+
+The health endpoint (`GET /api/v1/enrich/health`) and actuator probe endpoints are public and do not require a key.
 
 ---
 
@@ -20,7 +26,7 @@ Currently, the service is unsecured. Authentication will be added via OAuth 2.0 
 
 Enrich a single transaction and receive the result immediately.
 
-**Endpoint:** `POST /api/v1/enrich/single`
+**Endpoint:** `POST /api/v1/enrich`
 
 **Request:**
 ```json
@@ -78,12 +84,17 @@ Enrich a single transaction and receive the result immediately.
 
 **cURL Example:**
 ```bash
-curl -X POST http://localhost:8080/api/v1/enrich/single \
+curl -X POST http://localhost:8080/api/v1/enrich \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: $ENRICH_API_KEY" \
   -d '{
-    "description": "SHELL OIL CENTER HOUSTON TX",
-    "merchantName": "SHELL",
-    "amount": 45.00
+    "accountId": "acc_001",
+    "transactions": [{
+      "description": "SHELL OIL CENTER HOUSTON TX",
+      "amount": 45.00,
+      "date": "2026-01-30",
+      "merchantName": "SHELL"
+    }]
   }'
 ```
 
@@ -91,15 +102,21 @@ curl -X POST http://localhost:8080/api/v1/enrich/single \
 ```java
 RestTemplate restTemplate = new RestTemplate();
 
+HttpHeaders headers = new HttpHeaders();
+headers.setContentType(MediaType.APPLICATION_JSON);
+headers.set("X-API-Key", System.getenv("ENRICH_API_KEY"));
+
 EnrichmentRequest request = new EnrichmentRequest(
-    "SHELL OIL CENTER HOUSTON TX",
-    "SHELL",
-    new BigDecimal("45.00")
+    "acc_001",
+    List.of(new Transaction("SHELL OIL CENTER HOUSTON TX",
+                            new BigDecimal("45.00"),
+                            LocalDate.now(),
+                            "SHELL"))
 );
 
 ResponseEntity<EnrichmentResponse> response = restTemplate.postForEntity(
-    "http://localhost:8080/api/v1/enrich/single",
-    request,
+    "http://localhost:8080/api/v1/enrich",
+    new HttpEntity<>(request, headers),
     EnrichmentResponse.class
 );
 
@@ -109,17 +126,27 @@ System.out.println("Merchant: " + enriched.plaidResponse().enrichedTransactions(
 
 **Python Client Example:**
 ```python
-import requests
+import requests, os
 
 request_data = {
-    "description": "AMAZON.COM SEATTLE WA",
-    "merchantName": "AMAZON",
-    "amount": 29.99
+    "accountId": "acc_001",
+    "transactions": [{
+        "description": "AMAZON.COM SEATTLE WA",
+        "amount": 29.99,
+        "date": "2026-01-30",
+        "merchantName": "AMAZON"
+    }]
+}
+
+headers = {
+    "Content-Type": "application/json",
+    "X-API-Key": os.environ["ENRICH_API_KEY"]
 }
 
 response = requests.post(
-    "http://localhost:8080/api/v1/enrich/single",
-    json=request_data
+    "http://localhost:8080/api/v1/enrich",
+    json=request_data,
+    headers=headers
 )
 
 if response.status_code == 200:
@@ -183,20 +210,11 @@ Submit multiple transactions for asynchronous enrichment. Useful for high-volume
 ```bash
 curl -X POST http://localhost:8080/api/v1/enrich/batch \
   -H "Content-Type: application/json" \
-  -d '{
-    "transactions": [
-      {
-        "description": "SHELL OIL CENTER HOUSTON TX",
-        "merchantName": "SHELL",
-        "amount": 45.00
-      },
-      {
-        "description": "EXXON #5432 DALLAS TX",
-        "merchantName": "EXXON",
-        "amount": 60.00
-      }
-    ]
-  }'
+  -H "X-API-Key: $ENRICH_API_KEY" \
+  -d '[
+    {"accountId":"acc_001","transactions":[{"description":"SHELL OIL CENTER HOUSTON TX","amount":45.00,"date":"2026-01-30","merchantName":"SHELL"}]},
+    {"accountId":"acc_002","transactions":[{"description":"EXXON #5432 DALLAS TX","amount":60.00,"date":"2026-01-30","merchantName":"EXXON"}]}
+  ]'
 ```
 
 ---
@@ -264,14 +282,17 @@ Get the enriched result for a previously submitted transaction.
 
 **cURL Example:**
 ```bash
-curl http://localhost:8080/api/v1/enrich/550e8400-e29b-41d4-a716-446655440000
+curl http://localhost:8080/api/v1/enrich/550e8400-e29b-41d4-a716-446655440000 \
+  -H "X-API-Key: $ENRICH_API_KEY"
 ```
 
 **Polling Pattern (JavaScript):**
 ```javascript
 async function pollForResult(guid, maxAttempts = 30, delayMs = 1000) {
   for (let i = 0; i < maxAttempts; i++) {
-    const response = await fetch(`http://localhost:8080/api/v1/enrich/${guid}`);
+    const response = await fetch(`http://localhost:8080/api/v1/enrich/${guid}`, {
+      headers: { "X-API-Key": process.env.ENRICH_API_KEY }
+    });
     
     if (response.status === 200) {
       return await response.json(); // Completed
@@ -458,13 +479,20 @@ curl http://localhost:8080/actuator/health/circuitbreakers
 @Service
 public class PlaidEnrichmentClient {
     private final RestTemplate restTemplate = new RestTemplate();
+
+    @Value("${enrich.api-key}")
+    private String apiKey;
     
-    public EnrichmentResponse enrich(String description, String merchantName, BigDecimal amount) {
-        var request = new EnrichmentRequest(description, merchantName, amount);
+    public EnrichmentResponse enrich(String accountId, List<Transaction> transactions) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("X-API-Key", apiKey);
+
+        var request = new EnrichmentRequest(accountId, transactions);
         
         var response = restTemplate.postForEntity(
-            "http://localhost:8080/api/v1/enrich/single",
-            request,
+            "http://localhost:8080/api/v1/enrich",
+            new HttpEntity<>(request, headers),
             EnrichmentResponse.class
         );
         
