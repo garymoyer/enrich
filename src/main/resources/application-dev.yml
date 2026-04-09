@@ -1,3 +1,10 @@
+# Dev security — use a well-known test key so local development doesn't require an env var
+enrich:
+  security:
+    api-key: dev-api-key-not-for-production
+  cache:
+    ttl-days: 1  # Refresh stale entries after 1 day in dev to make TTL observable
+
 spring:
   datasource:
     url: jdbc:h2:mem:enrichdb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
@@ -42,7 +49,16 @@ management:
   endpoint:
     health:
       show-details: always
+  endpoints:
+    web:
+      exposure:
+        # Expose circuit breaker state in dev so engineers can inspect resilience behaviour
+        # without needing a separate monitoring tool.
+        include: health,info,metrics,prometheus,circuitbreakers,circuitbreakerevents
 
+# Enable Swagger UI in dev — disabled by default in application.yml for all other environments
 springdoc:
+  api-docs:
+    enabled: true
   swagger-ui:
     enabled: true

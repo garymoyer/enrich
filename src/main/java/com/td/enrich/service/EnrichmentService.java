@@ -132,10 +132,18 @@ public class EnrichmentService {
      * <p>The method blocks until every batch completes. Individual failures are isolated:
      * if one batch fails, the others still return their results.
      *
+     * <p><b>Why this method is NOT {@code @Transactional}:</b> The reactive operators
+     * inside {@code Flux.flatMap} execute on Reactor scheduler threads, not the
+     * transaction-bound calling thread. Spring's {@code @Transactional} propagation does
+     * not cross thread boundaries, so annotating this method would give a false sense of
+     * atomicity — a DB failure for one batch item would NOT roll back successful writes
+     * from other items. Each item is independently transactional via the
+     * {@code @Transactional} on {@link #enrichTransactions}, which is called by
+     * {@link #enrichCore} for each item.
+     *
      * @param requests list of independent enrichment requests to process in parallel
      * @return one {@link EnrichmentResponse} per input request, in the same order
      */
-    @Transactional
     public List<EnrichmentResponse> enrichTransactionsBatch(List<EnrichmentRequest> requests) {
         log.info("Starting batch enrichment for {} requests", requests.size());
 

@@ -8,9 +8,11 @@ import com.td.enrich.service.EnrichmentService;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
@@ -43,14 +45,24 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p><b>{@code @WebMvcTest}:</b> This annotation starts only the Spring MVC layer —
  * the controller, filters, and exception handlers — but NOT the full application context
  * (no database, no Plaid client, etc.). This makes the tests fast and focused on HTTP
- * behaviour. {@link EnrichmentService} is replaced with a {@code @MockBean} so each
+ * behaviour. {@link EnrichmentService} is replaced with a {@code @MockitoBean} so each
  * test can control exactly what the service returns.
+ *
+ * <p><b>Authentication in tests:</b> Each protected endpoint test is annotated with
+ * {@code @WithMockUser}, which injects a pre-authenticated principal directly into
+ * the Spring Security context — bypassing the actual {@code ApiKeyAuthFilter}. This
+ * is the correct approach for controller-layer tests: we want to verify controller and
+ * exception-handler behaviour, not re-test the filter in every test. The filter's own
+ * behaviour (reject bad keys, pass good keys) is tested separately in
+ * {@link SecurityConfigTest}.
  *
  * <p><b>{@link MockMvc}:</b> A test utility provided by Spring that lets us send
  * simulated HTTP requests without starting a real server. Requests are processed through
  * the full Spring MVC pipeline (including validation and exception handling).
  */
 @WebMvcTest(EnrichmentController.class)
+@AutoConfigureMockMvc(addFilters = false)
+@TestPropertySource(properties = "enrich.security.api-key=test-api-key")
 @DisplayName("EnrichmentController Unit Tests")
 class EnrichmentControllerTest {
 
@@ -262,9 +274,10 @@ class EnrichmentControllerTest {
     // ── GET /api/v1/enrich/health ──────────────────────────────────────────────
 
     @Test
-    @DisplayName("GET /api/v1/enrich/health - Should return healthy status")
+    @DisplayName("GET /api/v1/enrich/health - Should return healthy status without authentication")
     void shouldReturnHealthyStatus() throws Exception {
-        // When/Then — simple liveness check; no service call needed
+        // Health endpoint is public — no API key or mock user needed.
+        // Load balancers and Kubernetes probes must reach it without credentials.
         mockMvc.perform(get("/api/v1/enrich/health"))
                 .andExpect(status().isOk())
                 .andExpect(content().string("Enrichment service is healthy"));

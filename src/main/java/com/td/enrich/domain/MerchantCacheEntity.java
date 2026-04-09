@@ -95,4 +95,16 @@ public class MerchantCacheEntity {
      */
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
+
+    /**
+     * UTC timestamp of the most recent successful Plaid enrichment for this merchant.
+     * Updated every time the background queue processor writes a fresh Plaid response.
+     * {@code null} while {@code status = PENDING} (Plaid has not yet returned data).
+     *
+     * <p>Used by the TTL refresh scheduler to find stale entries — any row whose
+     * {@code last_enriched_at} is older than {@code enrich.cache.ttl-days} will be
+     * re-submitted to the enrichment queue.
+     */
+    @Column(name = "last_enriched_at")
+    private OffsetDateTime lastEnrichedAt;
 }

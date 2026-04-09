@@ -1,3 +1,10 @@
+# Security — production API key must be set via ENRICH_API_KEY environment variable
+enrich:
+  security:
+    api-key: ${ENRICH_API_KEY}
+  cache:
+    ttl-days: 30
+
 spring:
   datasource:
     url: ${AZURE_SQL_CONNECTION_STRING}

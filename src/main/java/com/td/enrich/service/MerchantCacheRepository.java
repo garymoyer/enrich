@@ -4,6 +4,8 @@ import com.td.enrich.domain.MerchantCacheEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -49,4 +51,25 @@ public interface MerchantCacheRepository extends JpaRepository<MerchantCacheEnti
      *         or {@link Optional#empty()} on a cache miss
      */
     Optional<MerchantCacheEntity> findByDescriptionAndMerchantName(String description, String merchantName);
+
+    /**
+     * Finds all ENRICHED entries whose Plaid data is older than the given cutoff time.
+     *
+     * <p>Used by the TTL refresh scheduler to identify stale cache entries that should
+     * be re-submitted to the enrichment queue. Only {@code ENRICHED} rows are returned
+     * — {@code PENDING} rows are already awaiting enrichment and do not need to be
+     * re-queued.
+     *
+     * <p>Spring translates this method name into a query equivalent to:
+     * <pre>{@code
+     * SELECT * FROM merchant_cache
+     *  WHERE status = 'ENRICHED'
+     *    AND last_enriched_at < ?
+     * }</pre>
+     *
+     * @param cutoff the threshold timestamp; rows with {@code last_enriched_at} before
+     *               this value are considered stale
+     * @return all stale ENRICHED cache entries, potentially an empty list
+     */
+    List<MerchantCacheEntity> findByStatusAndLastEnrichedAtBefore(String status, OffsetDateTime cutoff);
 }

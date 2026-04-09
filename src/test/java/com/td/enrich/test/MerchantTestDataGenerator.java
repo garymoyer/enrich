@@ -77,6 +77,7 @@ public class MerchantTestDataGenerator {
         new AbstractMap.SimpleEntry<>("SPROUTS", new MerchantInfo("Sprouts Farmers Market", 18.00, 110.00, "Grocery")),
         new AbstractMap.SimpleEntry<>("COSTCO", new MerchantInfo("Costco Wholesale", 50.00, 400.00, "Membership")),
         new AbstractMap.SimpleEntry<>("SAMS CLUB", new MerchantInfo("Sam's Club", 40.00, 350.00, "Membership")),
+        new AbstractMap.SimpleEntry<>("WALMART", new MerchantInfo("Walmart Inc", 15.00, 300.00, "General Merchandise")),
 
         // ── Retail — Apparel & Fashion ───────────────────────────────────────────────
         new AbstractMap.SimpleEntry<>("NIKE", new MerchantInfo("Nike", 60.00, 300.00, "Apparel")),

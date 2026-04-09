@@ -246,8 +246,10 @@ public class EnrichmentTestHarness {
 
             try {
                 long startTime = System.nanoTime();
-                client.enrichSingle(request);
+                EnrichmentResponse response = client.enrichSingle(request);
                 long elapsed = System.nanoTime() - startTime;
+                result.plaidResponseAvailable = response.enrichedTransactions() != null
+                        && !response.enrichedTransactions().isEmpty();
 
                 result.success = true;
                 result.responseTimeMs = elapsed / 1_000_000;

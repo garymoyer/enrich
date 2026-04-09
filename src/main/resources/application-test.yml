@@ -1,3 +1,10 @@
+# Security — well-known test key; never use in production
+enrich:
+  security:
+    api-key: test-api-key-not-for-production
+  cache:
+    ttl-days: 0  # Disable TTL refresh in tests to avoid background scheduler noise
+
 spring:
   datasource:
     # Testcontainers will override these at runtime

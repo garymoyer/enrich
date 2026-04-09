@@ -24,6 +24,17 @@ spring:
     deserialization:
       fail-on-unknown-properties: false
 
+# Security — API key authentication
+# Set ENRICH_API_KEY in the deployment environment. No default is provided here;
+# the service will fail to start if this property is absent (prevents unauthenticated deployments).
+enrich:
+  security:
+    api-key: ${ENRICH_API_KEY}
+  cache:
+    # How many days before a merchant cache entry is considered stale and re-enriched.
+    # Set to 0 to disable TTL-based refresh entirely.
+    ttl-days: 30
+
 # Plaid API Configuration
 plaid:
   api:
@@ -82,15 +93,18 @@ resilience4j:
         keep-alive-duration: 20s
 
 # Management & Actuator
+# Base exposure is minimal — only health, info, and metrics are public by default.
+# circuitbreakers and circuitbreakerevents are internal state; they are enabled only
+# in application-dev.yml to avoid leaking resilience internals in non-dev environments.
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus,circuitbreakers,circuitbreakerevents
+        include: health,info,metrics,prometheus
       base-path: /actuator
   endpoint:
     health:
-      show-details: always
+      show-details: when-authorized
       probes:
         enabled: true
   health:
@@ -106,16 +120,18 @@ management:
       application: ${spring.application.name}
 
 # OpenAPI Documentation
+# Disabled by default — enable explicitly in application-dev.yml or via ENABLE_SWAGGER=true.
+# Leaving Swagger enabled in non-local environments leaks the full API surface area.
 springdoc:
   api-docs:
     path: /api-docs
-    enabled: true
+    enabled: ${ENABLE_SWAGGER:false}
   swagger-ui:
     path: /swagger-ui.html
-    enabled: true
+    enabled: ${ENABLE_SWAGGER:false}
     operations-sorter: method
     tags-sorter: alpha
-  show-actuator: true
+  show-actuator: false
 
 # Server Configuration
 server:

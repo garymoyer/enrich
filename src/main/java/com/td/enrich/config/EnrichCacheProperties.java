@@ -65,6 +65,21 @@ public class EnrichCacheProperties {
      */
     private int workerThreads = 4;
 
+    /**
+     * Number of days after which a merchant cache entry is considered stale.
+     *
+     * <p>A scheduled job checks for entries whose {@code last_enriched_at} timestamp
+     * is older than this threshold and re-submits them to the enrichment queue. This
+     * ensures that Plaid data (merchant names, logos, categories) stays fresh even for
+     * merchants that are encountered repeatedly over months.
+     *
+     * <p>Set to {@code 0} to disable TTL-based refresh entirely (useful in tests to
+     * avoid scheduler noise). Typical production value: {@code 30} days.
+     *
+     * <p>Default: 30 days.
+     */
+    private int ttlDays = 30;
+
     public int getMaxSize() { return maxSize; }
     public void setMaxSize(int maxSize) { this.maxSize = maxSize; }
 
@@ -73,4 +88,7 @@ public class EnrichCacheProperties {
 
     public int getWorkerThreads() { return workerThreads; }
     public void setWorkerThreads(int workerThreads) { this.workerThreads = workerThreads; }
+
+    public int getTtlDays() { return ttlDays; }
+    public void setTtlDays(int ttlDays) { this.ttlDays = ttlDays; }
 }

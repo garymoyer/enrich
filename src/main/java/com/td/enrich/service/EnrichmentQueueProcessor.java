@@ -278,6 +278,9 @@ public class EnrichmentQueueProcessor {
                 merchantCacheRepository.findById(task.merchantId()).ifPresent(entity -> {
                     entity.setPlaidResponse(plaidJson);
                     entity.setStatus("ENRICHED");
+                    // Record when Plaid data was last successfully fetched so the TTL
+                    // refresh scheduler can identify entries that have gone stale.
+                    entity.setLastEnrichedAt(java.time.OffsetDateTime.now());
                     merchantCacheRepository.save(entity);
                 });
                 return null; // TransactionTemplate requires a return value; null is fine
